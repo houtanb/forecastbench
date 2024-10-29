@@ -1196,14 +1196,15 @@ def generate_forecasts(model, results, questions_to_eval, prompt_type):
     """Generate forecasts for the current model."""
     forecasts = []
     for index, question in enumerate(questions_to_eval):
-        if question["source"] in question_curation.DATA_SOURCES:
-            forecasts.extend(
-                generate_data_source_forecasts(model, results, question, index, prompt_type)
-            )
-        else:
-            forecasts.append(
-                generate_non_data_source_forecast(model, results, question, index, prompt_type)
-            )
+        if results[model][index] != "":
+            if question["source"] in question_curation.DATA_SOURCES:
+                forecasts.extend(
+                    generate_data_source_forecasts(model, results, question, index, prompt_type)
+                )
+            else:
+                forecasts.append(
+                    generate_non_data_source_forecast(model, results, question, index, prompt_type)
+                )
     return forecasts
 
 

@@ -13,6 +13,7 @@ export PROCESSED_FORECAST_SETS_BUCKET
 export PUBLIC_RELEASE_BUCKET
 export LLM_BASELINE_STAGING_BUCKET
 export LLM_BASELINE_NEWS_BUCKET
+export BUILD_ENV
 
 export CLOUD_DEPLOY_REGION := us-central1
 
@@ -174,5 +175,10 @@ nightly-worker-job:
 nightly-manager-job:
 	make -C src/nightly_update_workflow/manager
 
-llm-baselines:
-	make -C src/base_eval/llm_baselines
+llm-baselines: llm-baseline-manager llm-baseline-worker
+
+llm-baseline-manager:
+	make -C src/base_eval/llm_baselines/manager
+
+llm-baseline-worker:
+	make -C src/base_eval/llm_baselines/worker

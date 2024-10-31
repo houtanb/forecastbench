@@ -18,3 +18,5 @@ backoff
 google-cloud-aiplatform
 google-cloud-container
 google-cloud-artifact-registry
+google-cloud-run
+slack_sdk

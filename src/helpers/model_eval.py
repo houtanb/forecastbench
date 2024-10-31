@@ -562,12 +562,12 @@ def capitalize_substrings(model_name):
     return "-".join(capitalized_substrings)
 
 
-def generate_final_forecast_files(deadline, prompt_type, models, test_or_prod):
+def generate_final_forecast_files(forecast_due_date, prompt_type, models, test_or_prod):
     """
     Generate final forecast files for given models, merging individual forecasts into final files.
 
     Args:
-        deadline (str): The deadline for the forecast.
+        forecast_due_date (str): The forecast_due_date for the forecast.
         prompt_type (str): The type of prompt used.
         models (dict): A dictionary of models with their information.
 
@@ -642,9 +642,11 @@ def generate_final_forecast_files(deadline, prompt_type, models, test_or_prod):
         file_prompt_type = prompt_type
         if with_freeze_values:
             file_prompt_type += "_with_freeze_values"
-        new_file_name = f"{directory}/{deadline}.{org}.{model}_{file_prompt_type}.json"
+        new_file_name = f"{directory}/{forecast_due_date}.{org}.{model}_{file_prompt_type}.json"
         if test_or_prod == "TEST":
-            new_file_name = f"{directory}/TEST.{deadline}.{org}.{model}_{file_prompt_type}.json"
+            new_file_name = (
+                f"{directory}/TEST.{forecast_due_date}.{org}.{model}_{file_prompt_type}.json"
+            )
 
         model_name = (
             models[model]["full_name"]
@@ -655,8 +657,8 @@ def generate_final_forecast_files(deadline, prompt_type, models, test_or_prod):
         forecast_file = {
             "organization": org,
             "model": f"{capitalize_substrings(model_name)} ({file_prompt_type.replace('_', ' ')})",
-            "question_set": f"{deadline}-llm.json",
-            "forecast_due_date": deadline,
+            "question_set": f"{forecast_due_date}-llm.json",
+            "forecast_due_date": forecast_due_date,
             "forecasts": questions,
         }
 
@@ -664,10 +666,8 @@ def generate_final_forecast_files(deadline, prompt_type, models, test_or_prod):
             json.dump(forecast_file, f, indent=4)
 
     for model in models_to_test:
-        if "superforecaster" not in prompt_type:
-            # we don't run the freeze value version with superforecaster prompts
-            write_file(model=model, with_freeze_values=True, test_or_prod=test_or_prod)
-            create_final_file(model=model, with_freeze_values=True, test_or_prod=test_or_prod)
+        write_file(model=model, with_freeze_values=True, test_or_prod=test_or_prod)
+        create_final_file(model=model, with_freeze_values=True, test_or_prod=test_or_prod)
         write_file(model=model, with_freeze_values=False, test_or_prod=test_or_prod)
         create_final_file(model=model, with_freeze_values=False, test_or_prod=test_or_prod)
 
@@ -1085,63 +1085,6 @@ def download_and_read_saved_forecasts(filename, base_file_path):
     return data_utils.read_jsonl(local_filename)
 
 
-def process_questions_and_models(
-    questions,
-    models,
-    prompt_type,
-    base_file_path,
-    forecast_due_date,
-    market_use_freeze_value,
-    test_or_prod,
-):
-    """
-    Process questions for different models and prompt types.
-
-    Steps:
-    1. Determine test type for each question set.
-    2. Load existing results or initialize new ones.
-    3. Process each model for each question set.
-    4. Save and upload results.
-    """
-    results = {}
-    models_to_test = list(models.keys())
-    model_result_loaded = {model: False for model in models_to_test}
-
-    for question_set in questions:
-        test_type = determine_test_type(question_set, prompt_type, market_use_freeze_value)
-        if test_or_prod == "TEST":
-            test_type += "_test"
-        questions_to_eval = question_set
-
-        for model in models_to_test:
-            gcp_file_path = f"{base_file_path}/{test_type}/{model}.jsonl"
-
-            results[model] = download_and_read_saved_forecasts(gcp_file_path, base_file_path)
-
-            if results[model]:
-                model_result_loaded[model] = True
-                logger.info(f"Downloaded {gcp_file_path}.")
-            else:
-                logger.info(f"No results loaded for {gcp_file_path}.")
-                model_result_loaded[model] = False
-                results[model] = {i: "" for i in range(len(questions_to_eval))}
-
-        for model in models_to_test:
-            if not model_result_loaded[model]:
-                logger.info(f"{model} is running inference...")
-                process_model(
-                    model,
-                    models,
-                    test_type,
-                    results,
-                    questions_to_eval,
-                    forecast_due_date,
-                    prompt_type,
-                    market_use_freeze_value,
-                    base_file_path,
-                )
-
-
 def process_model(
     model,
     models,
@@ -1179,7 +1122,7 @@ def get_executor_count(model, models):
     return 50
 
 
-def determine_test_type(question_set, prompt_type, market_use_freeze_value):
+def determine_test_type(question_set, prompt_type, market_use_freeze_value, test_or_prod):
     """Determine the test type based on the question set and prompt type."""
     if question_set[0]["source"] in question_curation.MARKET_SOURCES:
         base_type = "market" if question_set[0]["combination_of"] == "N/A" else "combo_market"
@@ -1189,7 +1132,7 @@ def determine_test_type(question_set, prompt_type, market_use_freeze_value):
         base_type = (
             "non_market" if question_set[0]["combination_of"] == "N/A" else "combo_non_market"
         )
-    return f"{prompt_type}/{base_type}"
+    return f"{prompt_type}/{base_type}" + ("_test" if test_or_prod == "TEST" else "")
 
 
 def generate_forecasts(model, results, questions_to_eval, prompt_type):

@@ -193,9 +193,6 @@ def get_response_from_anthropic_model(model_name, prompt, max_tokens, temperatur
     Returns:
         str: Response string from the API call.
     """
-    if max_tokens > 4096:
-        max_tokens = 4096
-
     def api_call():
         completion = anthropic_console.messages.create(
             model=model_name,
@@ -411,7 +408,7 @@ async def get_async_response(
                     model=model_name,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
-                    max_tokens=4096,
+                    max_tokens=max_tokens,
                 )
                 return response.content[0].text
             elif model_source == constants.GOOGLE_SOURCE:

@@ -129,9 +129,13 @@ def get_response_from_oai_model(
         params = {
             "model": model_name,
             "messages": model_input,
-            "temperature": temperature,
-            "max_tokens" if "o1" not in model_name else "max_completion_tokens": max_tokens
         }
+        if "o1" in model_name:
+            params["max_completion_tokens"] = max_tokens
+        else:
+            params["temperature"] = temperature
+            params["max_tokens"] = max_tokens
+
         response = oai.chat.completions.create(**params)
 
         # logger.info(f"full prompt: {prompt}")
@@ -193,6 +197,7 @@ def get_response_from_anthropic_model(model_name, prompt, max_tokens, temperatur
     Returns:
         str: Response string from the API call.
     """
+
     def api_call():
         completion = anthropic_console.messages.create(
             model=model_name,

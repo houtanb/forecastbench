@@ -47,7 +47,7 @@ def _get_market(market_id):
     global N_API_CALLS
     N_API_CALLS += 1
     logger.info(f"Calling market endpoint for {market_id}. This is API call number {N_API_CALLS}.")
-    endpoint = f"https://www.metaculus.com/api2/questions/{market_id}"
+    endpoint = f"https://www.metaculus.com/api/posts/{market_id}"
     headers = {"Authorization": f"Token {keys.API_KEY_METACULUS}"}
     response = requests.get(endpoint, headers=headers, verify=certifi.where())
     if not response.ok:

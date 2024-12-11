@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 filenames = data_utils.generate_filenames(source="metaculus")
 
+MIN_NUM_FORECASTERS_ON_MARKET = 50
+
 
 @backoff.on_exception(
     backoff.expo,
@@ -29,14 +31,15 @@ filenames = data_utils.generate_filenames(source="metaculus")
 )
 def _call_endpoint(ids, additional_params=None):
     """Get the top 100 markets from Metaculus."""
-    endpoint = "https://www.metaculus.com/api2/questions/"
+    endpoint = "https://www.metaculus.com/api/posts/"
     params = {
-        "order_by": "-activity",
+        "order_by": "-forecasts_count",
         "forecast_type": "binary",
-        "status": "open",
+        "statuses": "open",
         "has_group": "false",
         "limit": 100,
-        "main-feed": True,
+        "for_main_feed": "true",
+        "with_cp": "false",
     }
     if additional_params:
         params.update(additional_params)
@@ -48,7 +51,11 @@ def _call_endpoint(ids, additional_params=None):
         logger.error("Request to Metaculus API endpoint failed.")
         response.raise_for_status()
 
-    ids.update(str(market["id"]) for market in response.json()["results"])
+    ids.update(
+        str(market["id"])
+        for market in response.json()["results"]
+        if market["nr_forecasters"] > MIN_NUM_FORECASTERS_ON_MARKET
+    )
     return ids
 
 
@@ -57,16 +64,13 @@ def _get_data(topics):
     logger.info("Calling Metaculus search-markets endpoint")
     ids = _call_endpoint(set())
     for topic in topics:
-        ids = _call_endpoint(ids, {"search": f"include:{topic}"})
+        ids = _call_endpoint(ids, {"categories": topic})
     return sorted(ids)
 
 
 @decorator.log_runtime
 def driver(_):
     """Fetch Metaculus data and update fetch file in GCP Cloud Storage."""
-    # Don't fetch new questions until API docs are out.
-    return
-
     # Get the latest Manifold data
     ids = _get_data(metaculus.CATEGORIES)
 

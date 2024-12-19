@@ -5,15 +5,20 @@ import json
 import logging
 import os
 import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy.stats import norm
 from termcolor import colored
+from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
 from helpers import (  # noqa: E402
     constants,
     decorator,
@@ -31,7 +36,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 LEADERBOARD_UPDATED_DATE_STR = "Updated " + datetime.now().strftime("%b. %d, %Y")
-BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecast"}
+BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecaster"}
 SUPERFORECASTER_MODEL = {
     "organization": constants.BENCHMARK_NAME,
     "model": "Superforecaster median forecast",
@@ -44,7 +49,9 @@ LEADERBOARD_DECIMAL_PLACES = 3
 
 def download_and_read_processed_forecast_file(filename):
     """Download forecast file."""
-    local_filename = "/tmp/tmp.json"
+    with tempfile.NamedTemporaryFile(dir="/tmp/", delete=False) as tmp:
+        local_filename = tmp.name
+
     gcp.storage.download(
         bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
         filename=filename,
@@ -53,13 +60,18 @@ def download_and_read_processed_forecast_file(filename):
     with open(local_filename, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    return data
+    os.remove(local_filename)
+    return {filename: data}
 
 
-def get_leaderboard_entry(df):
-    """Create the leaderboard entry for the given dataframe."""
-    # Masks
-    data_mask = df["source"].isin(question_curation.DATA_SOURCES)
+def get_masks(df):
+    """Return the data and market masks for the given dataframe."""
+    masks = {}
+
+    resolved_mask = df["resolved"].astype(bool)
+    unresolved_mask = ~resolved_mask
+
+    masks["data"] = df["source"].isin(question_curation.DATA_SOURCES) & resolved_mask
 
     # Market sources should be reduced to the value at a single date. This is because we always
     # evaluate to the latest market value or the resolution value for a market and orgs only
@@ -70,51 +82,63 @@ def get_leaderboard_entry(df):
             "id",
             "source",
             "direction",
+            "forecast_due_date",
         ]
     )
-    market_mask = market_source_mask & market_drop_duplicates_mask
+    masks["market"] = market_source_mask & market_drop_duplicates_mask
+    masks["market_resolved"] = masks["market"] & resolved_mask
+    masks["market_unresolved"] = masks["market"] & unresolved_mask
 
-    resolved_mask = df["resolved"].astype(bool)
-    unresolved_mask = ~resolved_mask
+    return masks
+
+
+def get_naive_forecaster_mask(df):
+    """Return the mask associated with the naive forecaster."""
+    return (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+
+
+def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
+    """Create the leaderboard entry for the given dataframe."""
 
     def get_scores(df, mask):
         scores = df[mask]["score"]
         return scores.mean(), len(scores)
 
+    masks = get_masks(df)
+
     # Datasets
-    data_resolved_score, n_data_resolved = get_scores(df, data_mask & resolved_mask)
-    data_resolved_std_dev = df[data_mask & resolved_mask]["score"].std(ddof=1)
-    data_resolved_se = data_resolved_std_dev / np.sqrt(n_data_resolved)
+    data_resolved_score, n_data_resolved = get_scores(df, masks["data"])
+    data_resolved_std_dev = df[masks["data"]]["score"].std(ddof=1)
 
     # Markets
-    market_resolved_score, n_market_resolved = get_scores(df, market_mask & resolved_mask)
-    market_unresolved_score, n_market_unresolved = get_scores(df, market_mask & unresolved_mask)
-    market_overall_score, n_market_overall = get_scores(df, market_mask)
-    market_overall_std_dev = df[market_mask]["score"].std(ddof=1)
-    market_overall_se = market_overall_std_dev / np.sqrt(n_market_overall)
+    market_resolved_score, n_market_resolved = get_scores(df, masks["market_resolved"])
+    market_unresolved_score, n_market_unresolved = get_scores(df, masks["market_unresolved"])
+    market_overall_score, n_market_overall = get_scores(df, masks["market"])
+    market_overall_std_dev = df[masks["market"]]["score"].std(ddof=1)
 
     # Overall Resolved
-    overall_resolved_score = (data_resolved_score + market_resolved_score) / 2
+    overall_resolved_score = (
+        (data_resolved_score + market_resolved_score) / 2
+        if not np.isnan(market_resolved_score)
+        else data_resolved_score
+    )
     n_overall_resolved = n_data_resolved + n_market_resolved
 
     # Overall
     overall_score = (data_resolved_score + market_overall_score) / 2
     n_overall = n_data_resolved + n_market_overall
-    overall_se = np.sqrt(data_resolved_se**2 + market_overall_se**2) / 2
-
-    # Overall CI
-    conservative_dof = min(n_data_resolved, n_market_overall) - 1
-    confidence_interval = np.round(
-        stats.t.interval(
-            confidence=CONFIDENCE_LEVEL, df=conservative_dof, loc=overall_score, scale=overall_se
-        ),
-        LEADERBOARD_DECIMAL_PLACES,
+    overall_std_dev = (
+        np.sqrt(
+            data_resolved_std_dev**2 / n_data_resolved
+            + market_overall_std_dev**2 / n_market_overall
+        )
+        / 2
     )
 
     # % imputed
-    pct_imputed = int(
-        np.round(df[(data_mask & resolved_mask) | market_mask]["imputed"].mean() * 100)
-    )
+    pct_imputed = int(np.round(df[masks["data"] | masks["market"]]["imputed"].mean() * 100))
 
     return {
         "data": data_resolved_score,
@@ -128,326 +152,77 @@ def get_leaderboard_entry(df):
         "overall_resolved": overall_resolved_score,
         "n_overall_resolved": n_overall_resolved,
         "overall": overall_score,
-        "confidence_interval_overall": confidence_interval,
+        "overall_std_dev": overall_std_dev,
         "n_overall": n_overall,
         "pct_imputed": pct_imputed,
         "df": df.copy(),
+        "forecast_due_date": forecast_due_date,
+        "question_set": question_set_filename,
     }
 
 
-def get_permutation_p_value(
-    df_data,
-    n_best_data,
-    n_comparison_data,
-    df_market,
-    n_best_market,
-    n_comparison_market,
-    observed_difference,
-    n_replications,
-):
-    """Get the p-value comparing comparison to best using the Permutation Test."""
-    permutation_differences = []
-    for _ in range(n_replications):
-        permuted_data_scores = np.random.permutation(df_data["score"])
-        comparison_data_sample = permuted_data_scores[:n_comparison_data]
-        best_data_sample = permuted_data_scores[n_comparison_data:]
-
-        permuted_market_scores = np.random.permutation(df_market["score"])
-        comparison_market_sample = permuted_market_scores[:n_comparison_market]
-        best_market_sample = permuted_market_scores[n_comparison_market:]
-
-        comparison_overall_mean = (
-            np.mean(comparison_data_sample) + np.mean(comparison_market_sample)
-        ) / 2
-        best_overall_mean = (np.mean(best_data_sample) + np.mean(best_market_sample)) / 2
-        permutation_differences.append(comparison_overall_mean - best_overall_mean)
-
-    permutation_differences = np.array(permutation_differences)
-    return np.round(
-        np.mean(permutation_differences > observed_difference), LEADERBOARD_DECIMAL_PLACES
-    )
-
-
-def get_bootstrap_p_value(
-    df_data,
-    n_best_data,
-    n_comparison_data,
-    df_market,
-    n_best_market,
-    n_comparison_market,
-    observed_difference,
-    n_replications,
-):
-    """Get the p-value comparing comparison to best by Bootstrapping."""
-    bootstrap_differences = []
-    for _ in range(n_replications):
-        df_best_data_resample = df_data["score"].sample(
-            n=n_best_data, replace=True, ignore_index=True
-        )
-        df_best_market_resample = df_market["score"].sample(
-            n=n_best_market, replace=True, ignore_index=True
-        )
-
-        df_comparison_data_resample = df_data["score"].sample(
-            n=n_comparison_data, replace=True, ignore_index=True
-        )
-        df_comparison_market_resample = df_market["score"].sample(
-            n=n_comparison_market, replace=True, ignore_index=True
-        )
-
-        comparison_overall_mean = (
-            df_comparison_data_resample.mean() + df_comparison_market_resample.mean()
-        ) / 2
-        best_overall_mean = (df_best_data_resample.mean() + df_best_market_resample.mean()) / 2
-        bootstrap_differences.append(comparison_overall_mean - best_overall_mean)
-
-    bootstrap_differences = np.array(bootstrap_differences)
-    return np.round(
-        np.mean(bootstrap_differences > observed_difference),
-        LEADERBOARD_DECIMAL_PLACES,
-    )
-
-
-def get_p_values(d):
-    """Get p values comparing comparison to best to see if they're significantly different."""
-    n_replications = 10000
-    df = pd.DataFrame(d)
-    df = df.sort_values(by=["overall"], ignore_index=True)
-
-    # Only get pairwise p-values for now, skip treating questions as indpendent.
-    # Keeping the code because it may come in handy when we run a new round with a different
-    # question set.
-    df = get_pairwise_p_values(df, n_replications)
-    df.drop(columns="df", inplace=True)
-    return df
-
-    p_val_bootstrap_col_name = "p-value_bootstrap"
-    p_val_permutation_col_name = "p-value_permutation"
-    df[p_val_bootstrap_col_name] = None
-    df[p_val_permutation_col_name] = None
-
-    # Get best performer
-    best_organization = df.at[0, "organization"]
-    best_model = df.at[0, "model"]
-    logger.info(f"p-value comparison best performer is: {best_organization} {best_model}.")
-
-    df_best = pd.DataFrame(df.at[0, "df"])
-    observed_overall_score_best = df.at[0, "overall"]
-
-    df_best_data = df_best[
-        (df_best["source"].isin(resolution.DATA_SOURCES)) & df_best["resolved"].astype(bool)
-    ]
-    df_best_market = df_best[df_best["source"].isin(resolution.MARKET_SOURCES)]
-
-    n_best_data = len(df_best_data)
-    n_best_market = len(df_best_market)
-
-    for index in range(1, len(df)):
-        df_comparison = pd.DataFrame(df.at[index, "df"])
-        observed_overall_score_comparison = df.at[index, "overall"]
-
-        df_comparison_data = df_comparison[
-            (df_comparison["source"].isin(resolution.DATA_SOURCES))
-            & df_comparison["resolved"].astype(bool)
-        ]
-        df_comparison_market = df_comparison[
-            df_comparison["source"].isin(resolution.MARKET_SOURCES)
-        ]
-
-        n_comparison_data = len(df_comparison_data)
-        n_comparison_market = len(df_comparison_market)
-
-        df_data = pd.concat([df_best_data, df_comparison_data], ignore_index=True)
-        df_market = pd.concat([df_best_market, df_comparison_market], ignore_index=True)
-
-        observed_difference = observed_overall_score_comparison - observed_overall_score_best
-
-        df.at[index, p_val_bootstrap_col_name] = get_bootstrap_p_value(
-            df_data=df_data,
-            n_best_data=n_best_data,
-            n_comparison_data=n_comparison_data,
-            df_market=df_market,
-            n_best_market=n_best_market,
-            n_comparison_market=n_comparison_market,
-            observed_difference=observed_difference,
-            n_replications=n_replications,
-        )
-        df.at[index, p_val_permutation_col_name] = get_permutation_p_value(
-            df_data=df_data,
-            n_best_data=n_best_data,
-            n_comparison_data=n_comparison_data,
-            df_market=df_market,
-            n_best_market=n_best_market,
-            n_comparison_market=n_comparison_market,
-            observed_difference=observed_difference,
-            n_replications=n_replications,
-        )
-
-    df.drop(columns="df", inplace=True)
-    return df
-
-
-def get_pairwise_p_values(df, n_replications):
-    """Calculate p-values on Brier differences on individual questions.
-
-    From Ezra: this improves precision because, for any two groups, forecasting accuracy is very
-    correlated on the set of questions. Treating them as independent overstates
-    imprecision. Instead, we can bootstrap the questions by focusing on the difference in scores on
-    a question-by-question basis.
-
-    A nice example of this is that if group A is always epsilon more accurate than group B on every
-    question, we can be quite confident A is a better forecaster, even if epsilon is arbitrarily
-    small and even if the standard deviation of accuracy for group A's forecasts is high.
-    """
-    p_val_bootstrap_col_name = "p-value_pairwise_bootstrap"
-    df[p_val_bootstrap_col_name] = None
-    better_than_super_col_name = "pct_better_than_no1"
-    df[better_than_super_col_name] = 0.0
-
-    # Get best performer
-    best_organization = df.at[0, "organization"]
-    best_model = df.at[0, "model"]
-    logger.info(f"p-value comparison best performer is: {best_organization} {best_model}.")
-
-    df_best = pd.DataFrame(df.at[0, "df"])
-    observed_overall_score_best = df.at[0, "overall"]
-
-    for index in range(1, len(df)):
-        df_comparison = pd.DataFrame(df.at[index, "df"])
-        observed_overall_score_comparison = df.at[index, "overall"]
-
-        # first merge on the questions to then get the diff between the scores
-        df_merged = pd.merge(
-            df_best.copy(),
-            df_comparison,
-            on=[
-                "id",
-                "source",
-                "direction",
-                "forecast_due_date",
-                "resolved",
-                "resolution_date",
-            ],
-            how="inner",
-            suffixes=[
-                "_best",
-                "_comparison",
-            ],
-        )
-        df_merged = df_merged[["id", "source", "resolved", "score_comparison", "score_best"]]
-
-        if not (len(df_best) == len(df_comparison) and len(df_best) == len(df_merged)):
-            missing_in_comparison = df_best.merge(
-                df_comparison,
-                on=[
-                    "id",
-                    "source",
-                    "direction",
-                    "forecast_due_date",
-                    "resolved",
-                    "resolution_date",
-                ],
-                how="left",
-                indicator=True,
-            ).query('_merge == "left_only"')
-
-            missing_in_best = df_comparison.merge(
-                df_best,
-                on=[
-                    "id",
-                    "source",
-                    "direction",
-                    "forecast_due_date",
-                    "resolved",
-                    "resolution_date",
-                ],
-                how="left",
-                indicator=True,
-            ).query('_merge == "left_only"')
-
-            print(missing_in_comparison)
-            print(missing_in_best)
-
-            raise ValueError(
-                "Problem with merge in `get_pairwise_p_values()`. Comparing org: "
-                f"{df.at[index, 'organization']}, model: {df.at[index, 'model']} "
-                f"n_best: {len(df_best)}, n_comparison: {len(df_comparison)}, "
-                f"n_merged: {len(df_merged)}"
-            )
-
-        df_merged_data = df_merged[
-            (df_merged["source"].isin(resolution.DATA_SOURCES)) & df_merged["resolved"].astype(bool)
-        ].reset_index(drop=True)
-        df_merged_market = df_merged[
-            df_merged["source"].isin(resolution.MARKET_SOURCES)
-        ].reset_index(drop=True)
-
-        df_merged_data_diff = df_merged_data["score_comparison"] - df_merged_data["score_best"]
-        df_merged_market_diff = (
-            df_merged_market["score_comparison"] - df_merged_market["score_best"]
-        )
-
-        observed_difference = observed_overall_score_comparison - observed_overall_score_best
-        assert (
-            abs(
-                observed_difference
-                - ((df_merged_data_diff.mean() + df_merged_market_diff.mean()) / 2)
-            )
-            < 1e-15
-        ), "Observed difference in scores is incorrect in `get_pairwise_p_values()`."
-
-        # Shift mean of scores to 0 for the null hypothesis that comparison and best scores are
-        # identical and hence their difference is 0
-        df_merged_data_diff -= df_merged_data_diff.mean()
-        df_merged_market_diff -= df_merged_market_diff.mean()
-
-        assert (
-            (df_merged_data_diff.mean() + df_merged_market_diff.mean()) / 2
-        ) < 1e-15, "Observed difference in scores is incorrect in `get_pairwise_p_values()`."
-
-        n_data = len(df_merged_data_diff)
-        n_market = len(df_merged_market_diff)
-
-        # Bootstrap p-value
-        overall_diff = []
-        for _ in range(n_replications):
-            df_data_diff_bootstrapped = df_merged_data_diff.sample(
-                n=n_data, replace=True, ignore_index=True
-            )
-            df_market_diff_bootstrapped = df_merged_market_diff.sample(
-                n=n_market, replace=True, ignore_index=True
-            )
-            overall_diff.append(
-                (df_data_diff_bootstrapped.mean() + df_market_diff_bootstrapped.mean()) / 2
-            )
-        overall_diff = np.array(overall_diff)
-
-        df.at[index, p_val_bootstrap_col_name] = np.round(
-            np.mean(overall_diff >= observed_difference), LEADERBOARD_DECIMAL_PLACES
-        )
-
-        # Percent better than supers
-        df_combo = pd.concat([df_merged_data, df_merged_market], ignore_index=True)
-        df.at[index, better_than_super_col_name] = (
-            np.round(
-                np.mean(df_combo["score_comparison"] < df_combo["score_best"]),
-                LEADERBOARD_DECIMAL_PLACES,
-            )
-            * 100
-        )
-
-    return df
-
-
-def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date):
+def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, question_set_filename):
     """Add scores to the leaderboard."""
-    leaderboard_entry = [org_and_model | get_leaderboard_entry(df)]
+    leaderboard_entry = [
+        org_and_model | get_leaderboard_entry(df, forecast_due_date, question_set_filename)
+    ]
     leaderboard["overall"] = leaderboard.get("overall", []) + leaderboard_entry
+    # for horizon in df["horizon"].unique():
+    #     leaderboard_entry = [
+    #         org_and_model
+    #         | get_leaderboard_entry(
+    #             df[df["horizon"] == horizon].copy(), forecast_due_date, question_set_filename
+    #         )
+    #     ]
+    #     leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
-def add_to_llm_leaderboard(*args, **kwargs):
-    """Wrap `add_to_leaderboard` for easy reading of driver."""
-    add_to_leaderboard(*args, **kwargs)
+def has_too_many_imputed(df, org_and_model) -> bool:
+    """Determine whether or not to include this model.
+
+    * Don't include models with more than D percent imputed data questions and M percent imputed
+      market questions.
+    * Always include ForecastBench models
+    """
+    if org_and_model["organization"] == constants.BENCHMARK_NAME:
+        return False
+
+    MIN_MARKET_RESOLVED = 5
+    MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
+    masks = get_masks(df)
+    df_data = df[masks["data"]]
+    df_market = df[masks["market"]]
+    df_market_resolved = df[masks["market_resolved"]]
+
+    if len(df_market_resolved) < MIN_MARKET_RESOLVED or (
+        df_data["imputed"].mean() > MIN_DATA_MISSING_PCT
+        or df_market["imputed"].mean() > MIN_MARKET_MISSING_PCT
+    ):
+        logger.info(f"DROPPING {org_and_model}")
+        logger.info(f" * % imputed data: {round(df_data['imputed'].mean() * 100, 2)}")
+        logger.info(f" * % imputed market: {round(df_market['imputed'].mean() * 100, 2)}")
+        logger.info(f" * N market resolved:: {len(df_market_resolved)}")
+        return True
+    return False
+
+
+def add_to_llm_leaderboard(
+    leaderboard, org_and_model, df, forecast_due_date, question_set_filename
+):
+    """Create the LLM leaderbeard.
+
+    * Remove combination questions before including in the LLM leaderboard
+    """
+    df_no_combos = df[df["direction"] == ()].reset_index(drop=True)
+
+    if not has_too_many_imputed(df_no_combos, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_no_combos,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
 
 
 def download_question_set_save_in_cache(forecast_due_date, cache):
@@ -465,7 +240,9 @@ def download_question_set_save_in_cache(forecast_due_date, cache):
             )
 
 
-def add_to_llm_and_human_leaderboard(leaderboard, org_and_model, df, forecast_due_date, cache):
+def add_to_human_leaderboard(
+    leaderboard, org_and_model, df, forecast_due_date, cache, question_set_filename
+):
     """Parse the forecasts to include only those questions that were in the human question set."""
     download_question_set_save_in_cache(forecast_due_date, cache)
     df_human_question_set = cache[forecast_due_date]["human"].copy()
@@ -474,16 +251,24 @@ def add_to_llm_and_human_leaderboard(leaderboard, org_and_model, df, forecast_du
         df_human_question_set[["id", "source"]],
         on=["id", "source"],
     ).reset_index(drop=True)
-    add_to_leaderboard(
-        leaderboard=leaderboard,
-        org_and_model=org_and_model,
-        df=df_only_human_question_set,
-        forecast_due_date=forecast_due_date,
-    )
+    if not has_too_many_imputed(df_only_human_question_set, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_only_human_question_set,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
 
 
 def add_to_llm_and_human_combo_leaderboards(
-    leaderboard_combo, org_and_model, df, forecast_due_date, cache, is_human_forecast_set
+    leaderboard_combo,
+    org_and_model,
+    df,
+    forecast_due_date,
+    cache,
+    is_human_forecast_set,
+    question_set_filename,
 ):
     """Parse the forecasts to include only those questions that were in the human question set."""
     download_question_set_save_in_cache(forecast_due_date, cache)
@@ -596,6 +381,7 @@ def add_to_llm_and_human_combo_leaderboards(
         org_and_model=org_and_model,
         df=df_only_human_question_set,
         forecast_due_date=forecast_due_date,
+        question_set_filename=question_set_filename,
     )
 
 
@@ -603,61 +389,101 @@ def make_and_upload_html_table(df, title, basename):
     """Make and upload HTLM leaderboard."""
     # Replace NaN with empty strings for display
     logger.info(f"Making HTML leaderboard file: {title} {basename}.")
-    df = df.fillna("")
+    df = df.fillna("--")
 
     # Add ranking
-    df = df.sort_values(by=["overall"], ignore_index=True)
+    df = df.sort_values(
+        by=[
+            "BSS_wrt_naive_mean",
+            "n_overall",
+            "overall",
+        ],
+        ascending=[
+            False,
+            False,
+            True,
+        ],
+        ignore_index=True,
+    )
+
+    # Round columns to 3 decimal places
+    numeric_cols = df.select_dtypes(include="number").columns
+    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
+
+    # Insert ranking
     df.insert(loc=0, column="Ranking", value="")
-    df["score_diff"] = df["overall"] - df["overall"].shift(1)
+    df["score_diff"] = df["BSS_wrt_naive_mean"] - df["BSS_wrt_naive_mean"].shift(1)
     for index, row in df.iterrows():
         if row["score_diff"] != 0:
             prev_rank = index + 1
         df.loc[index, "Ranking"] = prev_rank
     df.drop(columns="score_diff", inplace=True)
 
-    # Round columns to 3 decimal places
-    numeric_cols = df.select_dtypes(include="number").columns
-    df[numeric_cols] = df[numeric_cols].round(3)
-
-    # Rename columns
-    for col in [
-        "n_data",
-        "n_market_resolved",
-        "n_market_unresolved",
-        "n_market_overall",
-        "n_overall",
-        "n_overall_resolved",
-    ]:
-        if df[col].min() != df[col].max():
-            msg = (
-                f"Error making leaderboard {title}: in col {col}: min ({df[col].min()}) not equal "
-                f"to max ({df[col].max()})."
-            )
-            logger.error(msg)
-            raise ValueError(msg)
-
-    n_data = df["n_data"].max()
-    n_market_resolved = df["n_market_resolved"].max()
-    n_market_unresolved = df["n_market_unresolved"].max()
-    n_market_overall = df["n_market_overall"].max()
-    n_overall = df["n_overall"].max()
-    n_overall_resolved = df["n_overall_resolved"].max()
+    # n_data = df["n_data"].max()
+    # n_market_resolved = df["n_market_resolved"].max()
+    # n_market_unresolved = df["n_market_unresolved"].max()
+    # n_market_overall = df["n_market_overall"].max()
+    # n_overall = df["n_overall"].max()
+    # n_overall_resolved = df["n_overall_resolved"].max()
 
     df["pct_imputed"] = df["pct_imputed"].round(0).astype(int).astype(str) + "%"
-    df["pct_better_than_no1"] = df["pct_better_than_no1"].round(0).astype(int).astype(str) + "%"
+    # df["pct_better_than_no1"] = df["pct_better_than_no1"].round(0).astype(int).astype(str) + "%"
 
-    def get_p_value_display(p):
-        if not isinstance(p, (float, int)):
-            return str(p)
-        if p < 0.001:
-            return "<0.001"
-        if p < 0.01:
-            return "<0.01"
-        if p < 0.05:
-            return "<0.05"
-        return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
+    # def get_p_value_display(p):
+    #     if not isinstance(p, (float, int)):
+    #         return str(p)
+    #     if p < 0.001:
+    #         return "<0.001"
+    #     if p < 0.01:
+    #         return "<0.01"
+    #     if p < 0.05:
+    #         return "<0.05"
+    #     return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
+    #
+    # df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
 
-    df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
+    def link_question_set(question_set):
+        return (
+            '<a href="https://github.com/forecastingresearch/forecastbench-datasets/'
+            + "blob/main/datasets/question_sets/"
+            + question_set
+            + '">'
+            + question_set
+            + "</a>"
+        )
+
+    def link_question_sets(question_sets):
+        if isinstance(question_sets, str):
+            return link_question_set(question_sets)
+        if isinstance(question_sets, tuple):
+            retval = link_question_set(question_sets[0]) + ", "
+            if len(question_sets) > 2:
+                retval += "..., "
+            return retval + link_question_set(question_sets[-1])
+        raise ValueError("wrong type for question set")
+
+    df["question_set"] = df["question_set"].apply(link_question_sets)
+
+    def format_score(score_series, count_series):
+        def safe_format_score(x):
+            try:
+                return f"{float(x):.{LEADERBOARD_DECIMAL_PLACES}f}"
+            except (ValueError, TypeError):
+                return str(x)
+
+        formatted_scores = score_series.apply(safe_format_score)
+        formatted_counts = count_series.map(lambda x: f"{int(x):,}" if pd.notnull(x) else "")
+
+        # Ensure both series are strings before concatenation.
+        return formatted_scores.astype(str) + " (" + formatted_counts.astype(str) + ")"
+
+    df["data"] = format_score(df["data"], df["n_data"])
+    df["market_resolved"] = format_score(df["market_resolved"], df["n_market_resolved"])
+    df["market_unresolved"] = format_score(df["market_unresolved"], df["n_market_unresolved"])
+    df["market_overall"] = format_score(df["market_overall"], df["n_market_overall"])
+    df["overall_resolved"] = format_score(df["overall_resolved"], df["n_overall_resolved"])
+    df["overall"] = format_score(df["overall"], df["n_overall"])
+    df["BSS_wrt_naive_mean"] = format_score(df["BSS_wrt_naive_mean"], df["n_overall"])
 
     df = df[
         [
@@ -669,29 +495,35 @@ def make_and_upload_html_table(df, title, basename):
             "market_unresolved",
             "market_overall",
             "overall_resolved",
-            "overall",
-            "confidence_interval_overall",
-            "p-value_pairwise_bootstrap",
-            "pct_better_than_no1",
+            # "overall",
+            # "confidence_interval_overall",
+            # "p-value_pairwise_bootstrap",
+            # "pct_better_than_no1",
+            # "z_score_wrt_naive_mean",
+            "BSS_wrt_naive_mean",
+            "bootstrap_BSS_CI",
             "pct_imputed",
+            "question_set",
         ]
     ]
     df = df.rename(
         columns={
             "organization": "Organization",
             "model": "Model",
-            "data": f"Dataset Score (N={n_data:,})",
-            "market_resolved": f"Market Score (resolved) (N={n_market_resolved:,})",
-            "market_unresolved": f"Market Score (unresolved) (N={n_market_unresolved:,})",
-            "market_overall": f"Market Score (overall) (N={n_market_overall:,})",
-            "overall_resolved": f"Overall Resolved Score (N={n_overall_resolved:,})",
-            "overall": f"Overall Score (N={n_overall:,})",
-            "confidence_interval_overall": "Overall Score 95% CI",
-            "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
-            "pct_better_than_no1": "Pct. more accurate than No. 1",
-            "pct_imputed": "Pct. Imputed",
-            # "std_dev": Std. Dev.", # DELETE
+            "data": "Dataset Score",
+            "market_resolved": "Market Score (resolved)",
+            "market_unresolved": "Market Score (unresolved)",
+            "market_overall": "Market Score (overall)",
+            "overall_resolved": "Overall Resolved Score",
+            # "overall": "Overall Score",
+            # "confidence_interval_overall": "Overall Score 95% CI",
+            # "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
+            # "pct_better_than_no1": "Pct. more accurate than No. 1",
             # "z_score_wrt_naive_mean": "Z-score",
+            "BSS_wrt_naive_mean": "BSS",
+            "bootstrap_BSS_CI": "BSS 95% CI",
+            "pct_imputed": "Pct. Imputed",
+            "question_set": "Question Set(s)",
         }
     )
 
@@ -736,22 +568,16 @@ def make_and_upload_html_table(df, title, basename):
                                                  aggregation platforms</li>
               <li><b>Overall Resolved Score</b>: The average of the Dataset Score and the Market
                                                  Score (resolved) columns</li>
-              <li><b>Overall Score</b>: The average of the Dataset Score and the Market Score
-                                        (overall) columns</li>
-              <li><b>Overall Score 95% CI</b>: The 95% confidence interval for the Overall
-                                               Score</li>
-              <li><b>Pairwise p-value comparing to No. 1 (bootstrapped)</b>: The p-value calculated
-                              by bootstrapping the differences in overall score between each model
-                              and the best forecaster (the group with rank 1) under the null
-                              hypothesis that there's no difference.</li>
-              <li><b>Pct. more accurate than No. 1</b>: The percent of questions where this
-                              forecaster had a better overall score than the best forecaster (with
-                              rank 1)</li>
+              <li><b>BSS</b>: The Brier skill score.
+              <li><b>BSS 95% CI</b>: The bootstrapped confidence interval for the BSS.
               <li><b>Pct. imputed</b>: The percent of questions for which this forecaster did not
                               provide a forecast and hence had a forecast value imputed (0.5 for
                               dataset questions and the aggregate human forecast on the forecast
                               due date for questions sourced from prediction markets or forecast
                               aggregation platforms)</li>
+              <li><b>Question Set(s)</b>: The question sets that were forecast on. If more than two
+                              question sets were forecast on, show the oldest and the most recent.
+                              </li>
             </ul>
           </div>
         </div>
@@ -773,8 +599,14 @@ def make_and_upload_html_table(df, title, basename):
     df = df[[c for c in df.columns if not c.startswith("n_")]]
 
     html_code = df.to_html(
-        classes="table table-striped table-bordered", index=False, table_id="myTable"
+        classes="table table-striped table-bordered",
+        index=False,
+        table_id="myTable",
+        escape=False,
+        render_links=True,
     )
+
+    ORDER_COL_IDX = 8
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -856,18 +688,45 @@ def make_and_upload_html_table(df, title, basename):
         + """
         </div>
         <script>
+        """
+        + r"""
+        $.fn.dataTable.ext.type.detect.unshift(function(data) {
+            if (/^-?\d+(\.\d+)? \(/.test(data.trim())) {
+                return 'bss-num';
+            }
+            return null;
+        });
+        $.fn.dataTable.ext.type.order['bss-num-pre'] = function(data) {
+            const match = data.match(/^(-?\d+(\.\d+)?) \(([\d,]+)\)/);
+            if (match) {
+                const bssValue = parseFloat(match[1]);
+                const parensValue = parseInt(match[3].replace(/,/g, ""), 10);
+                return bssValue + (parensValue / 100000000);
+            }
+            return [0, 0];
+        };
         $(document).ready(function() {
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
-                "lengthMenu": [[-1], ["All"]],
-                "order": [[8, 'asc']],
+                "lengthMenu": [[-1], ["All"]],"""
+        + f"""
+                "order": [[{ORDER_COL_IDX}, "desc"]],"""
+        + """
                 "paging": false,
                 "info": false,
+                "orderMulti": false,
                 "search": {
                     "regex": true,
                     "smart": true
                 },
                 "columnDefs": [
+                    {"""
+        + f"""
+                        "targets": {ORDER_COL_IDX},"""
+        + """
+                        "type": "bss-num",
+                        "orderSequence": ["desc", "asc"]
+                    },
                     {
                         "targets": 10,
                         "className": "right-align"
@@ -878,7 +737,9 @@ def make_and_upload_html_table(df, title, basename):
                     }
                 ]
             });
-        table.column(8).nodes().to$().addClass('highlight');
+        """
+        + f"""table.column({ORDER_COL_IDX}).nodes().to$().addClass("highlight");"""
+        + """
         });
         </script>
     </body>
@@ -896,16 +757,16 @@ def make_and_upload_html_table(df, title, basename):
 
     # Upload files to Cloud
     destination_folder = "leaderboards"
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_html,
-        destination_folder=f"{destination_folder}/html",
-    )
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_csv,
-        destination_folder=f"{destination_folder}/csv",
-    )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_html,
+    #     destination_folder=f"{destination_folder}/html",
+    # )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_csv,
+    #     destination_folder=f"{destination_folder}/csv",
+    # )
 
     return {
         local_filename_html: f"{destination_folder}/html/{basename}.html",
@@ -913,10 +774,339 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
-def make_leaderboard(d, title, basename):
-    """Get p-values and make leaderboard."""
+def get_BSS(df):
+    """Calculate the standard scores with respect to naive forecaster for every question set."""
+    # df["z_score_wrt_naive_mean"] = None
+    df["BSS_wrt_naive_mean"] = None
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    for forecast_due_date in df["forecast_due_date"].unique():
+        mask_forecast_due_date = df["forecast_due_date"] == forecast_due_date
+        naive_mask = mask_naive_forecaster & mask_forecast_due_date
+        naive_baseline_mean = df[naive_mask]["overall"].values[0]
+        df.loc[mask_forecast_due_date, "BSS_wrt_naive_mean"] = (
+            1 - df[mask_forecast_due_date]["overall"] / naive_baseline_mean
+        )
+    return df
+
+
+def prep_combo_for_get_leaderboard_entry_call(df_group):
+    """Prepare arguments for get_leaderboard_entry call from merge functions."""
+    df_combined = pd.concat(df_group["df"].tolist(), ignore_index=True)
+    forecast_due_dates = tuple(sorted(df_group["forecast_due_date"].tolist()))
+    question_set_filenames = tuple(sorted(df_group["question_set"].tolist()))
+    return df_combined, forecast_due_dates, question_set_filenames
+
+
+def create_naive_forecaster_leaderboard_entries(df_naive_forecaster):
+    """Make a single leaderboard entry for every forecast due date combo of the naive forecaster."""
+    combined_result = []
+    unique_forecast_due_dates = df_naive_forecaster["forecast_due_date"].unique()
+    org_and_model = {
+        "organization": BASELINE_ORG_MODEL["organization"],
+        "model": BASELINE_ORG_MODEL["model"],
+    }
+    for r in range(2, len(unique_forecast_due_dates) + 1):
+        for combo in itertools.combinations(unique_forecast_due_dates, r):
+            df_tmp = df_naive_forecaster[
+                df_naive_forecaster["forecast_due_date"].isin(combo)
+            ].copy()
+            df_combined, forecast_due_dates, question_set_filenames = (
+                prep_combo_for_get_leaderboard_entry_call(df_tmp)
+            )
+            combined_result += [
+                org_and_model
+                | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+            ]
+    return combined_result
+
+
+def merge_duplicates(df):
+    """Merge the duplicated entries into one entry."""
+    naive_forecaster_mask = get_naive_forecaster_mask(df)
+    df_naive_forecaster = df[naive_forecaster_mask].reset_index(drop=True)
+    df = df[~naive_forecaster_mask].reset_index(drop=True)
+
+    combined_result = []
+    for (organization, model), df_group in df.groupby(["organization", "model"]):
+        logger.info(f"Combining forecasts for: Organization: {organization} Model: {model}.")
+        org_and_model = {"organization": organization, "model": model}
+        df_combined, forecast_due_dates, question_set_filenames = (
+            prep_combo_for_get_leaderboard_entry_call(df_group)
+        )
+        combined_result += [
+            org_and_model
+            | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+        ]
+
+    combined_result += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
+
+    df_merged = pd.DataFrame(combined_result)
+    # Add the individual naive forecaster lines back to the df to return. These will be used to
+    # bootstrap the BSS CI.
+    df_merged = pd.concat([df_merged, df_naive_forecaster], ignore_index=True)
+    df_merged = get_BSS(df_merged)
+
+    return df_merged  # .drop(index=to_drop).reset_index(drop=True)
+
+
+def merge_common_models(df):
+    """Merge common models for a given leaderboard."""
+    df = get_BSS(df)
+    df_duplicated = (
+        df[
+            df.duplicated(
+                subset=[
+                    "organization",
+                    "model",
+                ],
+                keep=False,
+            )
+        ]
+        .copy()
+        .reset_index(drop=True)
+    )
+    if df_duplicated.empty:
+        return df
+    df = df.drop_duplicates(
+        subset=[
+            "organization",
+            "model",
+        ],
+        keep=False,
+        ignore_index=True,
+    )
+    df_duplicated = merge_duplicates(df_duplicated)
+    return pd.concat([df, df_duplicated], ignore_index=True)
+
+
+def bootstrap_BSS_CI(df):
+    """Bootstrap the confidence interval for the BSS."""
+    n_replications = 100
+    mask_naive_forecaster_df = get_naive_forecaster_mask(df)
+    bootstrap_results = {}
+    df["bootstrap_BSS_CI"] = None
+
+    def sample_block_indices_by_source_by_horizon(df, mask):
+        """Sample everything where mask is true, source by source."""
+        sampled_indices = []
+        for source in df[mask]["source"].unique():
+            source_mask = mask & (df["source"] == source)
+            for resolution_date in df[source_mask]["resolution_date"].unique():
+                source_horizon_mask = source_mask & (df["resolution_date"] == resolution_date)
+                available_indices = df.loc[source_horizon_mask].index.to_numpy()
+                if len(available_indices) == 0:
+                    raise ValueError("Available indices should not be empty.")
+                sampled_indices.append(
+                    np.random.choice(available_indices, size=len(available_indices), replace=True)
+                )
+        return np.concatenate(sampled_indices)
+
+    def sample_block_indices_no_source(df, mask):
+        """Sample everything where mask is true."""
+        available_indices = df.loc[mask].index.to_numpy()
+        sampled_indices = np.random.choice(
+            available_indices, size=len(available_indices), replace=True
+        )
+        return sampled_indices
+
+    def get_sample_indices(df, forecast_due_date, sample_indices):
+        """Get the indices for the given forecast due date."""
+        if forecast_due_date in sample_indices.keys():
+            return sample_indices[forecast_due_date]
+
+        if isinstance(forecast_due_date, tuple):
+            for f in forecast_due_date:
+                get_sample_indices(
+                    df[df["forecast_due_date"].astype(str) == f].reset_index(drop=True),
+                    f,
+                    sample_indices,
+                )
+
+            data = []
+            market_resolved = []
+            market_unresolved = []
+            for f in forecast_due_date:
+                offset = df[df["forecast_due_date"].astype(str) == f].index[0]
+                data.append(offset + sample_indices[f]["data"])
+                market_resolved.append(offset + sample_indices[f]["market_resolved"])
+                market_unresolved.append(offset + sample_indices[f]["market_unresolved"])
+
+            indices = {}
+            indices["data"] = np.concatenate(data)
+            indices["market_resolved"] = np.concatenate(market_resolved)
+            indices["market_unresolved"] = np.concatenate(market_unresolved)
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
+        else:
+            masks = get_masks(df)
+
+            indices = {}
+            indices["data"] = sample_block_indices_by_source_by_horizon(df, masks["data"])
+            indices["market_resolved"] = sample_block_indices_no_source(
+                df,
+                masks["market_resolved"],
+            )
+            indices["market_unresolved"] = sample_block_indices_no_source(
+                df,
+                masks["market_unresolved"],
+            )
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
+
+    def apply_sample_indices(df, indices):
+        """Apply the sample provided to df."""
+        df_updated = df.copy()
+        # For each block, update the score column in place.
+
+        masks = get_masks(df)
+
+        for block, boot_indices in indices.items():
+            # Define the mask for the block.
+            # Here you must know how each block is defined. For example:
+            if block not in masks.keys():
+                raise ValueError("should not arrive here (3).")
+
+            orig_indices = df_updated.loc[masks[block]].index
+            new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
+            assert len(orig_indices) == len(
+                new_scores
+            ), "Mismatch in number of rows for market block"
+            df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
+
+        return df_updated
+
+    for _ in range(n_replications):
+        print(f"Replication {_}")
+
+        # Duplicate df with sampled scores for all models
+        df_tmp = df.copy()
+
+        # Drop combination of naive forecasters
+        # These should be recreated from the resampled individual naive forecasters
+        df_tmp = df_tmp[
+            ~(
+                mask_naive_forecaster_df
+                & df_tmp["question_set"].apply(lambda x: isinstance(x, tuple))
+            )
+        ].reset_index(drop=True)
+
+        leaderboard = []
+        sample_indices = {}
+        for _, row in df_tmp.iterrows():
+            df_model = row["df"].copy()
+
+            indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
+            df_model = apply_sample_indices(df_model, indices)
+
+            leaderboard += [
+                {
+                    "organization": row["organization"],
+                    "model": row["model"],
+                }
+                | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
+            ]
+
+        df_leaderboard = pd.DataFrame(leaderboard)
+        mask_naive_forecaster_df_leaderboard = get_naive_forecaster_mask(df_leaderboard)
+        df_naive_forecaster = (
+            df_leaderboard[mask_naive_forecaster_df_leaderboard].copy().reset_index(drop=True)
+        )
+        leaderboard += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
+
+        # Redo this to create the complete, resampled leaderboard
+        df_leaderboard = pd.DataFrame(leaderboard)
+
+        # Get BSS with the leaderboard, updated with the combined naive forecasters
+        df_leaderboard = get_BSS(df=df_leaderboard)
+        for _, row in df_leaderboard.iterrows():
+            key = (row["organization"], row["model"])
+            bss_value = row["BSS_wrt_naive_mean"]
+            bootstrap_results.setdefault(key, []).append(bss_value)
+
+    ci_results = {}
+    alpha = (1 - CONFIDENCE_LEVEL) / 2
+    for key, bss_values in bootstrap_results.items():
+        lower, upper = np.percentile(a=bss_values, q=[alpha * 100, (1 - alpha) * 100])
+        ci_results[key] = (lower, upper)
+
+    def assign_ci(row):
+        key = (row["organization"], row["model"])
+        ci = ci_results.get(key, None)
+        if ci is not None:
+            return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+        return None
+
+    df["bootstrap_BSS_CI"] = df.apply(assign_ci, axis=1)
+
+    # Remove extra naive forecasters
+    df_subset = df[mask_naive_forecaster_df].copy()
+    df_subset["tuple_length"] = df_subset["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
+    )
+    if (df_subset["tuple_length"] > 0).any():
+        max_index = df_subset["tuple_length"].idxmax()
+        to_drop = df_subset.index.difference([max_index])
+        df = df.drop(index=to_drop).reset_index(drop=True)
+    return df
+
+
+def impute_BSS_CI(df):
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    df_tmp = df.copy()
+    df_tmp["tuple_length"] = df_tmp["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
+    )
+    df_tmp = df_tmp[df_tmp["tuple_length"] == df_tmp["tuple_length"].max()]
+    df_tmp = df_tmp[~mask_naive_forecaster]
+
+    z = norm.ppf(1 - (1 - CONFIDENCE_LEVEL) / 2)
+    print(z)
+    rel_uncertainties = []
+    for _, row in df_tmp.iterrows():
+        lower, upper = row["bootstrap_BSS_CI"]
+        print(lower, upper)
+        se = (upper - lower) / (2 * z)
+        rel_uncertainty = se / abs(row["BSS_wrt_naive_mean"])
+        rel_uncertainties.append(rel_uncertainty)
+    relative_uncertainty = np.mean(rel_uncertainties)
+
+    def impute_cis(bss, relative_uncertainty):
+        imputed_se = relative_uncertainty * abs(bss)
+        ci = bss - z * imputed_se, bss + z * imputed_se
+        return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+
+    non_human_forecast_bench_models = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        ~df["model"].isin(["Superforecaster median forecast", "Public median forecast"])
+    )
+    models_to_exclude = set(df_tmp[["organization", "model"]].apply(tuple, axis=1))
+    mask_impute_to = (
+        ~df[["organization", "model"]]
+        .apply(lambda row: (row["organization"], row["model"]), axis=1)
+        .isin(models_to_exclude)
+    ) & ~non_human_forecast_bench_models
+
+    print("printing mask impute to cols")
+    print(df[mask_impute_to])
+    df["relative_uncertainty"] = relative_uncertainty
+    df["imputed_BSS_CI"] = df["bootstrap_BSS_CI"]
+    df.loc[mask_impute_to, "imputed_BSS_CI"] = df.loc[mask_impute_to, "BSS_wrt_naive_mean"].apply(
+        impute_cis, args=(relative_uncertainty,)
+    )
+    print(df)
+    return df
+
+
+def make_leaderboard(leaderboard, title, basename):
+    """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = get_p_values(d)
+    df = pd.DataFrame(leaderboard)
+    df = merge_common_models(df)
+    df = bootstrap_BSS_CI(df)
+    # df = impute_BSS_CI(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -930,7 +1120,7 @@ def worker(task):
     """Pool worker for leaderboard creation."""
     try:
         return make_leaderboard(
-            d=task["d"],
+            leaderboard=task["leaderboard"],
             title=task["title"],
             basename=task["basename"],
         )
@@ -945,15 +1135,45 @@ def driver(_):
     """Create new leaderboard."""
     cache = {}
     llm_leaderboard = {}
-    llm_and_human_leaderboard = {}
-    llm_and_human_combo_leaderboard = {}
+    human_leaderboard = {}
+    # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    files = [file for file in files if file.endswith(".json")]
-    logger.info(f"Have access to {env.NUM_CPUS}.")
-    for f in files:
-        logger.info(f"Downloading, reading, and scoring forecasts in `{f}`...")
+    files = [file for file in files if file.endswith(".json")]  # and file.startswith("2024-07-21")]
+    # pprint(files)
+    files1 = [
+        "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+        "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+        "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+        "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+        "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+        "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+        "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+        "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+        "2025-03-02/2025-03-02.ForecastBench.always-0.json",
+        "2025-03-16/2025-03-16.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+        "2025-03-16/2025-03-16.ForecastBench.always-0.json",
+        "2025-03-16/2025-03-16.ForecastBench.naive-forecaster.json",
+        "2025-03-16/2025-03-16.DeepSeek.DeepSeek-R1_scratchpad_with_freeze_values.json",
+    ]
 
-        data = download_and_read_processed_forecast_file(filename=f)
+    with ThreadPoolExecutor() as executor:
+        dfs = list(
+            tqdm(
+                executor.map(
+                    download_and_read_processed_forecast_file,
+                    files,
+                ),
+                total=len(files),
+                desc="downloading processed forecast files",
+            )
+        )
+        executor.shutdown(wait=True)
+
+    logger.info(f"Have access to {env.NUM_CPUS} CPU.")
+    for d in dfs:
+        f, data = next(iter(d.items()))
+        logger.info(f"Scoring forecasts in `{f}`...")
+
         if not data or not isinstance(data, dict):
             logger.warning(f"Problem processing {f}. First `continue`.")
             continue
@@ -987,56 +1207,87 @@ def driver(_):
         df = resolution.make_columns_hashable(df)
         df["resolution_date"] = pd.to_datetime(df["resolution_date"]).dt.date
         df["forecast_due_date"] = pd.to_datetime(df["forecast_due_date"]).dt.date
+        df["horizon"] = (df["resolution_date"] - df["forecast_due_date"]).apply(
+            lambda delta: delta.days
+        )
+
+        masks = get_masks(df)
+        df = df[masks["data"] | masks["market"]].reset_index(drop=True)
 
         org_and_model = {"organization": organization, "model": model}
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
+
         if not is_human_forecast_set:
-            add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)
-        add_to_llm_and_human_leaderboard(
-            llm_and_human_leaderboard,
+            add_to_llm_leaderboard(
+                llm_leaderboard,
+                org_and_model,
+                df,
+                forecast_due_date,
+                question_set_filename=question_set_filename,
+            )
+        add_to_human_leaderboard(
+            human_leaderboard,
             org_and_model,
             df,
             forecast_due_date,
             cache,
+            question_set_filename=question_set_filename,
         )
-
-        add_to_llm_and_human_combo_leaderboards(
-            llm_and_human_combo_leaderboard,
-            org_and_model,
-            df,
-            forecast_due_date,
-            cache,
-            is_human_forecast_set,
-        )
-
-    def get_z_score(df):
-        # mask = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
-        #     df["model"] == BASELINE_ORG_MODEL["model"]
+        print()
+        # add_to_llm_and_human_combo_leaderboards(
+        #     llm_and_human_combo_leaderboard,
+        #     org_and_model,
+        #     df,
+        #     forecast_due_date,
+        #     cache,
+        #     is_human_forecast_set,
+        #     question_set_filename=question_set_filename,
         # )
-        # naive_baseline_mean = df[mask]["overall"].values[0]
-        # naive_std_dev = df[mask]["std_dev"].values[0]
-        # df["z_score_wrt_naive_mean"] = (df["overall"] - naive_baseline_mean) / naive_std_dev
-        return df
 
     title = "Leaderboard: overall"
     tasks = [
+        # {
+        #     "leaderboard": llm_leaderboard["overall"],
+        #     "title": title,
+        #     "basename": "leaderboard_overall",
+        # },
+        # {
+        #     "leaderboard": human_leaderboard["overall"],
+        #     "title": f"Human {title}",
+        #     "basename": "human_leaderboard_overall_high_level",
+        # },
         {
-            "d": llm_leaderboard["overall"],
-            "title": title,
-            "basename": "leaderboard_overall",
-        },
-        {
-            "d": llm_and_human_leaderboard["overall"],
+            "leaderboard": human_leaderboard["overall"],
             "title": f"Human {title}",
             "basename": "human_leaderboard_overall",
         },
-        {
-            "d": llm_and_human_combo_leaderboard["overall"],
-            "title": f"Human Combo {title}",
-            "basename": "human_combo_leaderboard_overall",
-        },
+        # {
+        #     "d": human_leaderboard["7"],
+        #     "title": f"Human {title} 7 day",
+        #     "basename": "human_leaderboard_overall_7",
+        # },
+        # {
+        #     "d": human_leaderboard["30"],
+        #     "title": f"Human {title} 30 day",
+        #     "basename": "human_leaderboard_overall_30",
+        # },
+        # {
+        #     "d": human_leaderboard["90"],
+        #     "title": f"Human {title} 90 day",
+        #     "basename": "human_leaderboard_overall_90",
+        # },
+        # {
+        #     "d": human_leaderboard["180"],
+        #     "title": f"Human {title} 180 day",
+        #     "basename": "human_leaderboard_overall_180",
+        # },
+        # {
+        #     "d": llm_and_human_combo_leaderboard["overall"],
+        #     "title": f"Human Combo {title}",
+        #     "basename": "human_combo_leaderboard_overall",
+        # },
     ]
 
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")

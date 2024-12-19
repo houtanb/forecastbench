@@ -70,6 +70,16 @@ def _construct_questions(dff, dfq):
         )
         freeze_datetime_value_explanation = row["freeze_datetime_value_explanation"]
         values = dff[dff["id"] == id]["value"]
+        dates = pd.to_datetime(dff[dff["id"] == id]["period"])
+
+        last_fetch_date = dates.iloc[-1]
+        last_fetch_value = values.iloc[-1]
+        freeze_datetime_value = (
+            float(last_fetch_value)
+            if last_fetch_date > dates.get_date_yesterday() and last_fetch_value != "NA"
+            else "N/A"
+        )
+
         if (values.tail(observations_without_data) != "NA").any():
             new_row = {
                 "id": id,
@@ -82,7 +92,7 @@ def _construct_questions(dff, dfq):
                 "market_info_resolution_datetime": "N/A",
                 "resolved": False,
                 "forecast_horizons": constants.FORECAST_HORIZONS_IN_DAYS,
-                "freeze_datetime_value": float(values[values != "NA"].iloc[-1]),
+                "freeze_datetime_value": freeze_datetime_value,
                 "freeze_datetime_value_explanation": freeze_datetime_value_explanation,
             }
             new_row = pd.DataFrame([new_row])

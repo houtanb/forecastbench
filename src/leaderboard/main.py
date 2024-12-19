@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 LEADERBOARD_UPDATED_DATE_STR = "Updated " + datetime.now().strftime("%b. %d, %Y")
-BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecast"}
+BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecaster"}
 SUPERFORECASTER_MODEL = {
     "organization": constants.BENCHMARK_NAME,
     "model": "Superforecaster median forecast",
@@ -56,7 +56,7 @@ def download_and_read_processed_forecast_file(filename):
     return data
 
 
-def get_leaderboard_entry(df):
+def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
     """Create the leaderboard entry for the given dataframe."""
     # Masks
     data_mask = df["source"].isin(question_curation.DATA_SOURCES)
@@ -94,13 +94,24 @@ def get_leaderboard_entry(df):
     market_overall_se = market_overall_std_dev / np.sqrt(n_market_overall)
 
     # Overall Resolved
-    overall_resolved_score = (data_resolved_score + market_resolved_score) / 2
+    overall_resolved_score = (
+        (data_resolved_score + market_resolved_score) / 2
+        if not np.isnan(market_resolved_score)
+        else data_resolved_score
+    )
     n_overall_resolved = n_data_resolved + n_market_resolved
 
     # Overall
     overall_score = (data_resolved_score + market_overall_score) / 2
     n_overall = n_data_resolved + n_market_overall
     overall_se = np.sqrt(data_resolved_se**2 + market_overall_se**2) / 2
+    overall_std_dev = (
+        np.sqrt(
+            data_resolved_std_dev**2 / n_data_resolved
+            + market_overall_std_dev**2 / n_market_overall
+        )
+        / 2
+    )
 
     # Overall CI
     conservative_dof = min(n_data_resolved, n_market_overall) - 1
@@ -128,10 +139,13 @@ def get_leaderboard_entry(df):
         "overall_resolved": overall_resolved_score,
         "n_overall_resolved": n_overall_resolved,
         "overall": overall_score,
+        "overall_std_dev": overall_std_dev,
         "confidence_interval_overall": confidence_interval,
         "n_overall": n_overall,
         "pct_imputed": pct_imputed,
         "df": df.copy(),
+        "forecast_due_date": forecast_due_date,
+        "question_set": question_set_filename,
     }
 
 
@@ -439,10 +453,20 @@ def get_pairwise_p_values(df, n_replications):
     return df
 
 
-def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date):
+def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, question_set_filename):
     """Add scores to the leaderboard."""
-    leaderboard_entry = [org_and_model | get_leaderboard_entry(df)]
+    leaderboard_entry = [
+        org_and_model | get_leaderboard_entry(df, forecast_due_date, question_set_filename)
+    ]
     leaderboard["overall"] = leaderboard.get("overall", []) + leaderboard_entry
+    for horizon in df["horizon"].unique():
+        leaderboard_entry = [
+            org_and_model
+            | get_leaderboard_entry(
+                df[df["horizon"] == horizon].copy(), forecast_due_date, question_set_filename
+            )
+        ]
+        leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
 def add_to_llm_leaderboard(*args, **kwargs):
@@ -465,7 +489,9 @@ def download_question_set_save_in_cache(forecast_due_date, cache):
             )
 
 
-def add_to_llm_and_human_leaderboard(leaderboard, org_and_model, df, forecast_due_date, cache):
+def add_to_llm_and_human_leaderboard(
+    leaderboard, org_and_model, df, forecast_due_date, cache, question_set_filename
+):
     """Parse the forecasts to include only those questions that were in the human question set."""
     download_question_set_save_in_cache(forecast_due_date, cache)
     df_human_question_set = cache[forecast_due_date]["human"].copy()
@@ -479,11 +505,18 @@ def add_to_llm_and_human_leaderboard(leaderboard, org_and_model, df, forecast_du
         org_and_model=org_and_model,
         df=df_only_human_question_set,
         forecast_due_date=forecast_due_date,
+        question_set_filename=question_set_filename,
     )
 
 
 def add_to_llm_and_human_combo_leaderboards(
-    leaderboard_combo, org_and_model, df, forecast_due_date, cache, is_human_forecast_set
+    leaderboard_combo,
+    org_and_model,
+    df,
+    forecast_due_date,
+    cache,
+    is_human_forecast_set,
+    question_set_filename,
 ):
     """Parse the forecasts to include only those questions that were in the human question set."""
     download_question_set_save_in_cache(forecast_due_date, cache)
@@ -596,6 +629,7 @@ def add_to_llm_and_human_combo_leaderboards(
         org_and_model=org_and_model,
         df=df_only_human_question_set,
         forecast_due_date=forecast_due_date,
+        question_set_filename=question_set_filename,
     )
 
 
@@ -603,10 +637,10 @@ def make_and_upload_html_table(df, title, basename):
     """Make and upload HTLM leaderboard."""
     # Replace NaN with empty strings for display
     logger.info(f"Making HTML leaderboard file: {title} {basename}.")
-    df = df.fillna("")
+    df = df.fillna("--")
 
     # Add ranking
-    df = df.sort_values(by=["overall"], ignore_index=True)
+    df = df.sort_values(by=["z_score_wrt_naive_mean", "question_set", "overall"], ignore_index=True)
     df.insert(loc=0, column="Ranking", value="")
     df["score_diff"] = df["overall"] - df["overall"].shift(1)
     for index, row in df.iterrows():
@@ -619,45 +653,57 @@ def make_and_upload_html_table(df, title, basename):
     numeric_cols = df.select_dtypes(include="number").columns
     df[numeric_cols] = df[numeric_cols].round(3)
 
-    # Rename columns
-    for col in [
-        "n_data",
-        "n_market_resolved",
-        "n_market_unresolved",
-        "n_market_overall",
-        "n_overall",
-        "n_overall_resolved",
-    ]:
-        if df[col].min() != df[col].max():
-            msg = (
-                f"Error making leaderboard {title}: in col {col}: min ({df[col].min()}) not equal "
-                f"to max ({df[col].max()})."
-            )
-            logger.error(msg)
-            raise ValueError(msg)
-
-    n_data = df["n_data"].max()
-    n_market_resolved = df["n_market_resolved"].max()
-    n_market_unresolved = df["n_market_unresolved"].max()
-    n_market_overall = df["n_market_overall"].max()
-    n_overall = df["n_overall"].max()
-    n_overall_resolved = df["n_overall_resolved"].max()
+    # n_data = df["n_data"].max()
+    # n_market_resolved = df["n_market_resolved"].max()
+    # n_market_unresolved = df["n_market_unresolved"].max()
+    # n_market_overall = df["n_market_overall"].max()
+    # n_overall = df["n_overall"].max()
+    # n_overall_resolved = df["n_overall_resolved"].max()
 
     df["pct_imputed"] = df["pct_imputed"].round(0).astype(int).astype(str) + "%"
-    df["pct_better_than_no1"] = df["pct_better_than_no1"].round(0).astype(int).astype(str) + "%"
+    # df["pct_better_than_no1"] = df["pct_better_than_no1"].round(0).astype(int).astype(str) + "%"
 
-    def get_p_value_display(p):
-        if not isinstance(p, (float, int)):
-            return str(p)
-        if p < 0.001:
-            return "<0.001"
-        if p < 0.01:
-            return "<0.01"
-        if p < 0.05:
-            return "<0.05"
-        return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
+    # def get_p_value_display(p):
+    #     if not isinstance(p, (float, int)):
+    #         return str(p)
+    #     if p < 0.001:
+    #         return "<0.001"
+    #     if p < 0.01:
+    #         return "<0.01"
+    #     if p < 0.05:
+    #         return "<0.05"
+    #     return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
+    #
+    # df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
 
-    df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
+    df["question_set"] = (
+        '<a href="https://github.com/forecastingresearch/forecastbench-datasets/'
+        + "blob/main/datasets/question_sets/"
+        + df["question_set"]
+        + '">'
+        + df["question_set"]
+        + "</a>"
+    )
+
+    def format_score(score_series, count_series):
+        def safe_format_score(x):
+            try:
+                return f"{float(x):.3f}"
+            except (ValueError, TypeError):
+                return str(x)
+
+        formatted_scores = score_series.apply(safe_format_score)
+        formatted_counts = count_series.map(lambda x: f"{int(x):,}" if pd.notnull(x) else "")
+
+        # Ensure both series are strings before concatenation.
+        return formatted_scores.astype(str) + " (" + formatted_counts.astype(str) + ")"
+
+    df["data"] = format_score(df["data"], df["n_data"])
+    df["market_resolved"] = format_score(df["market_resolved"], df["n_market_resolved"])
+    df["market_unresolved"] = format_score(df["market_unresolved"], df["n_market_unresolved"])
+    df["market_overall"] = format_score(df["market_overall"], df["n_market_overall"])
+    df["overall_resolved"] = format_score(df["overall_resolved"], df["n_overall_resolved"])
+    df["overall"] = format_score(df["overall"], df["n_overall"])
 
     df = df[
         [
@@ -671,27 +717,29 @@ def make_and_upload_html_table(df, title, basename):
             "overall_resolved",
             "overall",
             "confidence_interval_overall",
-            "p-value_pairwise_bootstrap",
-            "pct_better_than_no1",
+            # "p-value_pairwise_bootstrap",
+            # "pct_better_than_no1",
+            "z_score_wrt_naive_mean",
             "pct_imputed",
+            "question_set",
         ]
     ]
     df = df.rename(
         columns={
             "organization": "Organization",
             "model": "Model",
-            "data": f"Dataset Score (N={n_data:,})",
-            "market_resolved": f"Market Score (resolved) (N={n_market_resolved:,})",
-            "market_unresolved": f"Market Score (unresolved) (N={n_market_unresolved:,})",
-            "market_overall": f"Market Score (overall) (N={n_market_overall:,})",
-            "overall_resolved": f"Overall Resolved Score (N={n_overall_resolved:,})",
-            "overall": f"Overall Score (N={n_overall:,})",
+            "data": "Dataset Score",
+            "market_resolved": "Market Score (resolved)",
+            "market_unresolved": "Market Score (unresolved)",
+            "market_overall": "Market Score (overall)",
+            "overall_resolved": "Overall Resolved Score",
+            "overall": "Overall Score",
             "confidence_interval_overall": "Overall Score 95% CI",
-            "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
-            "pct_better_than_no1": "Pct. more accurate than No. 1",
+            # "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
+            # "pct_better_than_no1": "Pct. more accurate than No. 1",
             "pct_imputed": "Pct. Imputed",
-            # "std_dev": Std. Dev.", # DELETE
-            # "z_score_wrt_naive_mean": "Z-score",
+            "z_score_wrt_naive_mean": "Z-score",
+            "question_set": "Question Set",
         }
     )
 
@@ -740,10 +788,6 @@ def make_and_upload_html_table(df, title, basename):
                                         (overall) columns</li>
               <li><b>Overall Score 95% CI</b>: The 95% confidence interval for the Overall
                                                Score</li>
-              <li><b>Pairwise p-value comparing to No. 1 (bootstrapped)</b>: The p-value calculated
-                              by bootstrapping the differences in overall score between each model
-                              and the best forecaster (the group with rank 1) under the null
-                              hypothesis that there's no difference.</li>
               <li><b>Pct. more accurate than No. 1</b>: The percent of questions where this
                               forecaster had a better overall score than the best forecaster (with
                               rank 1)</li>
@@ -752,6 +796,7 @@ def make_and_upload_html_table(df, title, basename):
                               dataset questions and the aggregate human forecast on the forecast
                               due date for questions sourced from prediction markets or forecast
                               aggregation platforms)</li>
+              <li><b>Question Set</b>: The question set that was forecast on.</li>
             </ul>
           </div>
         </div>
@@ -773,8 +818,13 @@ def make_and_upload_html_table(df, title, basename):
     df = df[[c for c in df.columns if not c.startswith("n_")]]
 
     html_code = df.to_html(
-        classes="table table-striped table-bordered", index=False, table_id="myTable"
+        classes="table table-striped table-bordered",
+        index=False,
+        table_id="myTable",
+        escape=False,
+        render_links=True,
     )
+
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -860,7 +910,7 @@ def make_and_upload_html_table(df, title, basename):
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
                 "lengthMenu": [[-1], ["All"]],
-                "order": [[8, 'asc']],
+                "order": [[10, 'asc']],
                 "paging": false,
                 "info": false,
                 "search": {
@@ -878,7 +928,7 @@ def make_and_upload_html_table(df, title, basename):
                     }
                 ]
             });
-        table.column(8).nodes().to$().addClass('highlight');
+        table.column(10).nodes().to$().addClass('highlight');
         });
         </script>
     </body>
@@ -896,16 +946,16 @@ def make_and_upload_html_table(df, title, basename):
 
     # Upload files to Cloud
     destination_folder = "leaderboards"
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_html,
-        destination_folder=f"{destination_folder}/html",
-    )
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_csv,
-        destination_folder=f"{destination_folder}/csv",
-    )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_html,
+    #     destination_folder=f"{destination_folder}/html",
+    # )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_csv,
+    #     destination_folder=f"{destination_folder}/csv",
+    # )
 
     return {
         local_filename_html: f"{destination_folder}/html/{basename}.html",
@@ -913,10 +963,29 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
+def get_z_scores(df):
+    """Calculate the standard scores with respect to naive forecaster for every question set."""
+    df["z_score_wrt_naive_mean"] = None
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    for forecast_due_date in df["forecast_due_date"].unique():
+        mask_forecast_due_date = df["forecast_due_date"] == forecast_due_date
+        naive_mask = mask_naive_forecaster & mask_forecast_due_date
+        naive_baseline_mean = df[naive_mask]["overall"].values[0]
+        naive_std_dev = df[naive_mask]["overall_std_dev"].values[0]
+        df.loc[mask_forecast_due_date, "z_score_wrt_naive_mean"] = (
+            df[mask_forecast_due_date]["overall"] - naive_baseline_mean
+        ) / naive_std_dev
+
+    return df
+
+
 def make_leaderboard(d, title, basename):
-    """Get p-values and make leaderboard."""
+    """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = get_p_values(d)
+    df = pd.DataFrame(d)
+    df = get_z_scores(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -946,9 +1015,34 @@ def driver(_):
     cache = {}
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
-    llm_and_human_combo_leaderboard = {}
+    # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json")]
+    # files = [
+    #     # '2024-07-21/2024-07-21.ForecastBench.always-0.5.json',
+    #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+    #     # '2024-07-21/2024-07-21.ForecastBench.always-1.json',
+    #     # '2024-07-21/2024-07-21.ForecastBench.human_public.json',
+    #     "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+    #     # '2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json',
+    #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+    #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
+    #     # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
+    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
+    #     "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
+    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json',
+    # ]
     logger.info(f"Have access to {env.NUM_CPUS}.")
     for f in files:
         logger.info(f"Downloading, reading, and scoring forecasts in `{f}`...")
@@ -987,38 +1081,40 @@ def driver(_):
         df = resolution.make_columns_hashable(df)
         df["resolution_date"] = pd.to_datetime(df["resolution_date"]).dt.date
         df["forecast_due_date"] = pd.to_datetime(df["forecast_due_date"]).dt.date
+        df["horizon"] = (df["resolution_date"] - df["forecast_due_date"]).apply(
+            lambda delta: delta.days
+        )
 
         org_and_model = {"organization": organization, "model": model}
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
         if not is_human_forecast_set:
-            add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)
+            add_to_llm_leaderboard(
+                llm_leaderboard,
+                org_and_model,
+                df,
+                forecast_due_date,
+                question_set_filename=question_set_filename,
+            )
         add_to_llm_and_human_leaderboard(
             llm_and_human_leaderboard,
             org_and_model,
             df,
             forecast_due_date,
             cache,
+            question_set_filename=question_set_filename,
         )
 
-        add_to_llm_and_human_combo_leaderboards(
-            llm_and_human_combo_leaderboard,
-            org_and_model,
-            df,
-            forecast_due_date,
-            cache,
-            is_human_forecast_set,
-        )
-
-    def get_z_score(df):
-        # mask = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
-        #     df["model"] == BASELINE_ORG_MODEL["model"]
+        # add_to_llm_and_human_combo_leaderboards(
+        #     llm_and_human_combo_leaderboard,
+        #     org_and_model,
+        #     df,
+        #     forecast_due_date,
+        #     cache,
+        #     is_human_forecast_set,
+        #     question_set_filename=question_set_filename,
         # )
-        # naive_baseline_mean = df[mask]["overall"].values[0]
-        # naive_std_dev = df[mask]["std_dev"].values[0]
-        # df["z_score_wrt_naive_mean"] = (df["overall"] - naive_baseline_mean) / naive_std_dev
-        return df
 
     title = "Leaderboard: overall"
     tasks = [
@@ -1033,10 +1129,30 @@ def driver(_):
             "basename": "human_leaderboard_overall",
         },
         {
-            "d": llm_and_human_combo_leaderboard["overall"],
-            "title": f"Human Combo {title}",
-            "basename": "human_combo_leaderboard_overall",
+            "d": llm_and_human_leaderboard["7"],
+            "title": f"Human {title} 7 day",
+            "basename": "human_leaderboard_overall_7",
         },
+        {
+            "d": llm_and_human_leaderboard["30"],
+            "title": f"Human {title} 30 day",
+            "basename": "human_leaderboard_overall_30",
+        },
+        {
+            "d": llm_and_human_leaderboard["90"],
+            "title": f"Human {title} 90 day",
+            "basename": "human_leaderboard_overall_90",
+        },
+        {
+            "d": llm_and_human_leaderboard["180"],
+            "title": f"Human {title} 180 day",
+            "basename": "human_leaderboard_overall_180",
+        },
+        # {
+        #     "d": llm_and_human_combo_leaderboard["overall"],
+        #     "title": f"Human Combo {title}",
+        #     "basename": "human_combo_leaderboard_overall",
+        # },
     ]
 
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")

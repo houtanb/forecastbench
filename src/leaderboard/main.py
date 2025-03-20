@@ -646,21 +646,31 @@ def make_and_upload_html_table(df, title, basename):
 
     # Add ranking
     df = df.sort_values(
-        by=["BSS_wrt_naive_mean", "question_set", "overall"],
-        ascending=[False, True, True],
+        by=[
+            "BSS_wrt_naive_mean",
+            "n_overall",
+            "overall",
+        ],
+        ascending=[
+            False,
+            False,
+            True,
+        ],
         ignore_index=True,
     )
+
+    # Round columns to 3 decimal places
+    numeric_cols = df.select_dtypes(include="number").columns
+    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
+
+    # Insert ranking
     df.insert(loc=0, column="Ranking", value="")
-    df["score_diff"] = df["overall"] - df["overall"].shift(1)
+    df["score_diff"] = df["BSS_wrt_naive_mean"] - df["BSS_wrt_naive_mean"].shift(1)
     for index, row in df.iterrows():
         if row["score_diff"] != 0:
             prev_rank = index + 1
         df.loc[index, "Ranking"] = prev_rank
     df.drop(columns="score_diff", inplace=True)
-
-    # Round columns to 3 decimal places
-    numeric_cols = df.select_dtypes(include="number").columns
-    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
 
     # n_data = df["n_data"].max()
     # n_market_resolved = df["n_market_resolved"].max()
@@ -762,10 +772,10 @@ def make_and_upload_html_table(df, title, basename):
             # "confidence_interval_overall": "Overall Score 95% CI",
             # "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
             # "pct_better_than_no1": "Pct. more accurate than No. 1",
-            "pct_imputed": "Pct. Imputed",
             # "z_score_wrt_naive_mean": "Z-score",
             "BSS_wrt_naive_mean": "BSS",
             "bootstrap_BSS_CI": "BSS 95% CI",
+            "pct_imputed": "Pct. Imputed",
             "question_set": "Question Set(s)",
         }
     )
@@ -931,20 +941,45 @@ def make_and_upload_html_table(df, title, basename):
         + """
         </div>
         <script>
+        """
+        + r"""
+        $.fn.dataTable.ext.type.detect.unshift(function(data) {
+            if (/^-?\d+(\.\d+)? \(/.test(data.trim())) {
+                return 'bss-num';
+            }
+            return null;
+        });
+        $.fn.dataTable.ext.type.order['bss-num-pre'] = function(data) {
+            const match = data.match(/^(-?\d+(\.\d+)?) \(([\d,]+)\)/);
+            if (match) {
+                const bssValue = parseFloat(match[1]);
+                const parensValue = parseInt(match[3].replace(/,/g, ""), 10);
+                return bssValue + (parensValue / 100000000);
+            }
+            return [0, 0];
+        };
         $(document).ready(function() {
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
-                "lengthMenu": [[-1], ["All"]],
-                "order": """
-        + f"[[{ORDER_COL_IDX}, 'desc']],"
+                "lengthMenu": [[-1], ["All"]],"""
+        + f"""
+                "order": [[{ORDER_COL_IDX}, "desc"]],"""
         + """
                 "paging": false,
                 "info": false,
+                "orderMulti": false,
                 "search": {
                     "regex": true,
                     "smart": true
                 },
                 "columnDefs": [
+                    {"""
+        + f"""
+                        "targets": {ORDER_COL_IDX},"""
+        + """
+                        "type": "bss-num",
+                        "orderSequence": ["desc", "asc"]
+                    },
                     {
                         "targets": 10,
                         "className": "right-align"
@@ -956,7 +991,7 @@ def make_and_upload_html_table(df, title, basename):
                 ]
             });
         """
-        + f"table.column({ORDER_COL_IDX}).nodes().to$().addClass('highlight');"
+        + f"""table.column({ORDER_COL_IDX}).nodes().to$().addClass("highlight");"""
         + """
         });
         </script>
@@ -1073,9 +1108,8 @@ def merge_duplicates(df):
     return df_merged  # .drop(index=to_drop).reset_index(drop=True)
 
 
-def merge_common_models_for_leaderboard(leaderboard_horizon):
+def merge_common_models(df):
     """Merge common models for a given leaderboard."""
-    df = pd.DataFrame(leaderboard_horizon)
     df = get_BSS(df)
     df_duplicated = (
         df[
@@ -1104,17 +1138,9 @@ def merge_common_models_for_leaderboard(leaderboard_horizon):
     return pd.concat([df, df_duplicated], ignore_index=True)
 
 
-def merge_common_models(leaderboard):
-    """Merge common models for all leaderboards."""
-    for key in leaderboard.keys():
-        leaderboard[key] = merge_common_models_for_leaderboard(leaderboard[key])
-
-    return leaderboard
-
-
-def bootstrap_BSS_CI_helper(df):
+def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 1000
+    n_replications = 10
     mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
@@ -1131,7 +1157,7 @@ def bootstrap_BSS_CI_helper(df):
         leaderboard = []
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
-            data_mask = df_model["source"].isin(question_curation.DATA_SOURCES)
+            data_mask = (df_model["source"].isin(question_curation.DATA_SOURCES)) & (df_model["resolved"].astype(bool))
             market_source_mask = df_model["source"].isin(question_curation.MARKET_SOURCES)
             market_drop_duplicates_mask = ~df_model.duplicated(
                 [
@@ -1210,16 +1236,12 @@ def bootstrap_BSS_CI_helper(df):
     return df
 
 
-def bootstrap_BSS_CI(leaderboard):
-    """Bootstrap the confidence interval for the BSS."""
-    for key in leaderboard.keys():
-        leaderboard[key] = bootstrap_BSS_CI_helper(leaderboard[key])
-    return leaderboard
-
-
-def make_leaderboard(df, title, basename):
+def make_leaderboard(leaderboard, title, basename):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
+    df = pd.DataFrame(leaderboard)
+    df = merge_common_models(df)
+    df = bootstrap_BSS_CI(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -1233,7 +1255,7 @@ def worker(task):
     """Pool worker for leaderboard creation."""
     try:
         return make_leaderboard(
-            df=task["df"],
+            leaderboard=task["leaderboard"],
             title=task["title"],
             basename=task["basename"],
         )
@@ -1250,36 +1272,36 @@ def driver(_):
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
-    # files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    # files = [file for file in files if file.endswith(".json")]
-    files = [
-        # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
-        "2024-07-21/2024-07-21.ForecastBench.always-0.json",
-        # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
-        # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
-        # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-        # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
-        "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-        # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
-        "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
-        "2024-12-08/2024-12-08.ForecastBench.always-0.json",
-        # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
-        # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
-        "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
-        # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
-        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
-        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
-        "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
-        "2025-03-02/2025-03-02.ForecastBench.always-0.json",
-        "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
-    ]
+    files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
+    files = [file for file in files if file.endswith(".json")]
+    # files1 = [
+    #     # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+    #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
+    #     # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
+    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
+    #     "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
+    #     # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
+    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
+    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
+    #     "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+    #     "2025-03-02/2025-03-02.ForecastBench.always-0.json",
+    #     "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+    # ]
 
     with ThreadPoolExecutor() as executor:
         dfs = list(
@@ -1370,21 +1392,19 @@ def driver(_):
         # )
 
     title = "Leaderboard: overall"
-
-    llm_leaderboard = merge_common_models(llm_leaderboard)
-    llm_and_human_leaderboard = merge_common_models(llm_and_human_leaderboard)
-
-    llm_leaderboard = bootstrap_BSS_CI(llm_leaderboard)
-    llm_and_human_leaderboard = bootstrap_BSS_CI(llm_and_human_leaderboard)
-
     tasks = [
+        # {
+        #     "leaderboard": llm_leaderboard["overall"],
+        #     "title": title,
+        #     "basename": "leaderboard_overall",
+        # },
+        # {
+        #     "leaderboard": llm_and_human_leaderboard["overall"],
+        #     "title": f"Human {title}",
+        #     "basename": "human_leaderboard_overall_high_level",
+        # },
         {
-            "df": llm_leaderboard["overall"],
-            "title": title,
-            "basename": "leaderboard_overall",
-        },
-        {
-            "df": llm_and_human_leaderboard["overall"],
+            "leaderboard": llm_and_human_leaderboard["overall"],
             "title": f"Human {title}",
             "basename": "human_leaderboard_overall",
         },

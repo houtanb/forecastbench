@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
 
@@ -12,6 +14,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from termcolor import colored
+from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from helpers import (  # noqa: E402
@@ -44,7 +47,9 @@ LEADERBOARD_DECIMAL_PLACES = 3
 
 def download_and_read_processed_forecast_file(filename):
     """Download forecast file."""
-    local_filename = "/tmp/tmp.json"
+    with tempfile.NamedTemporaryFile(dir="/tmp/", delete=False) as tmp:
+        local_filename = tmp.name
+
     gcp.storage.download(
         bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
         filename=filename,
@@ -53,7 +58,8 @@ def download_and_read_processed_forecast_file(filename):
     with open(local_filename, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    return data
+    os.remove(local_filename)
+    return {filename: data}
 
 
 def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
@@ -70,6 +76,7 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
             "id",
             "source",
             "direction",
+            "forecast_due_date",
         ]
     )
     market_mask = market_source_mask & market_drop_duplicates_mask
@@ -638,7 +645,11 @@ def make_and_upload_html_table(df, title, basename):
     df = df.fillna("--")
 
     # Add ranking
-    df = df.sort_values(by=["z_score_wrt_naive_mean", "question_set", "overall"], ignore_index=True)
+    df = df.sort_values(
+        by=["BSS_wrt_naive_mean", "question_set", "overall"],
+        ascending=[False, True, True],
+        ignore_index=True,
+    )
     df.insert(loc=0, column="Ranking", value="")
     df["score_diff"] = df["overall"] - df["overall"].shift(1)
     for index, row in df.iterrows():
@@ -674,14 +685,24 @@ def make_and_upload_html_table(df, title, basename):
     #
     # df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
 
-    df["question_set"] = (
-        '<a href="https://github.com/forecastingresearch/forecastbench-datasets/'
-        + "blob/main/datasets/question_sets/"
-        + df["question_set"]
-        + '">'
-        + df["question_set"]
-        + "</a>"
-    )
+    def link_question_set(question_set):
+        return (
+            '<a href="https://github.com/forecastingresearch/forecastbench-datasets/'
+            + "blob/main/datasets/question_sets/"
+            + question_set
+            + '">'
+            + question_set
+            + "</a>"
+        )
+
+    def link_question_sets(question_sets):
+        if isinstance(question_sets, str):
+            return link_question_set(question_sets)
+        if isinstance(question_sets, tuple):
+            return tuple(link_question_set(question_set) for question_set in question_sets)
+        raise ValueError("wrong type for question set")
+
+    df["question_set"] = df["question_set"].apply(link_question_sets)
 
     def format_score(score_series, count_series):
         def safe_format_score(x):
@@ -717,7 +738,8 @@ def make_and_upload_html_table(df, title, basename):
             "confidence_interval_overall",
             # "p-value_pairwise_bootstrap",
             # "pct_better_than_no1",
-            "z_score_wrt_naive_mean",
+            # "z_score_wrt_naive_mean",
+            "BSS_wrt_naive_mean",
             "pct_imputed",
             "question_set",
         ]
@@ -736,8 +758,9 @@ def make_and_upload_html_table(df, title, basename):
             # "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
             # "pct_better_than_no1": "Pct. more accurate than No. 1",
             "pct_imputed": "Pct. Imputed",
-            "z_score_wrt_naive_mean": "Z-score",
-            "question_set": "Question Set",
+            # "z_score_wrt_naive_mean": "Z-score",
+            "BSS_wrt_naive_mean": "BSS",
+            "question_set": "Question Set(s)",
         }
     )
 
@@ -908,7 +931,7 @@ def make_and_upload_html_table(df, title, basename):
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
                 "lengthMenu": [[-1], ["All"]],
-                "order": [[10, 'asc']],
+                "order": [[10, 'desc']],
                 "paging": false,
                 "info": false,
                 "search": {
@@ -961,9 +984,10 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
-def get_z_scores(df):
+def get_BSS(df):
     """Calculate the standard scores with respect to naive forecaster for every question set."""
-    df["z_score_wrt_naive_mean"] = None
+    # df["z_score_wrt_naive_mean"] = None
+    df["BSS_wrt_naive_mean"] = None
     mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
@@ -971,19 +995,137 @@ def get_z_scores(df):
         mask_forecast_due_date = df["forecast_due_date"] == forecast_due_date
         naive_mask = mask_naive_forecaster & mask_forecast_due_date
         naive_baseline_mean = df[naive_mask]["overall"].values[0]
-        naive_std_dev = df[naive_mask]["overall_std_dev"].values[0]
-        df.loc[mask_forecast_due_date, "z_score_wrt_naive_mean"] = (
-            df[mask_forecast_due_date]["overall"] - naive_baseline_mean
-        ) / naive_std_dev
-
+        # naive_std_dev = df[naive_mask]["overall_std_dev"].values[0]
+        # df.loc[mask_forecast_due_date, "z_score_wrt_naive_mean"] = (
+        #     df[mask_forecast_due_date]["overall"] - naive_baseline_mean
+        # ) / naive_std_dev
+        df.loc[mask_forecast_due_date, "BSS_wrt_naive_mean"] = (
+            1 - df[mask_forecast_due_date]["overall"] / naive_baseline_mean
+        )
     return df
 
 
-def make_leaderboard(d, title, basename):
+def merge_duplicates(df):
+    """Merge the duplicated entries into one entry."""
+    naive_forecaster_mask = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    df_naive_forecaster = df[naive_forecaster_mask].reset_index(drop=True)
+    df = df[~naive_forecaster_mask].reset_index(drop=True)
+
+    def prep_for_func_call(df_group):
+        df_combined = pd.concat(df_group["df"].tolist(), ignore_index=True)
+        forecast_due_dates = tuple(sorted(df_group["forecast_due_date"].tolist()))
+        question_set_filenames = tuple(sorted(df_group["question_set"].tolist()))
+        return df_combined, forecast_due_dates, question_set_filenames
+
+    combined_result = []
+    for (organization, model), df_group in df.groupby(["organization", "model"]):
+        logger.info(f"Combining forecasts for: Organization: {organization} Model: {model}.")
+        org_and_model = {"organization": organization, "model": model}
+        df_combined, forecast_due_dates, question_set_filenames = prep_for_func_call(df_group)
+        combined_result += [
+            org_and_model
+            | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+        ]
+
+    logger.info(f"Combining forecasts for {BASELINE_ORG_MODEL}")
+
+    unique_forecast_due_dates = df_naive_forecaster["forecast_due_date"].unique()
+    org_and_model = {
+        "organization": BASELINE_ORG_MODEL["organization"],
+        "model": BASELINE_ORG_MODEL["model"],
+    }
+    for r in range(2, len(unique_forecast_due_dates) + 1):
+        for combo in itertools.combinations(unique_forecast_due_dates, r):
+            df_tmp = df_naive_forecaster[df_naive_forecaster["forecast_due_date"].isin(combo)]
+            df_combined, forecast_due_dates, question_set_filenames = prep_for_func_call(df_tmp)
+            combined_result += [
+                org_and_model
+                | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+            ]
+
+    df_merged = pd.DataFrame(combined_result)
+    df_merged = get_BSS(df_merged)
+
+    # Remove extra naive forecaster
+    naive_forecaster_mask = (df_merged["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df_merged["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    df_subset = df_merged[naive_forecaster_mask].copy()
+    df_subset["tuple_length"] = df_subset["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
+    )
+    max_index = df_subset["tuple_length"].idxmax()
+    to_drop = df_subset.index.difference([max_index])
+
+    return df_merged.drop(index=to_drop).reset_index(drop=True)
+
+
+def merge_common_models_for_leaderboard(leaderboard_horizon):
+    """Merge common models for a given leaderboard."""
+    df = pd.DataFrame(leaderboard_horizon)
+    df = get_BSS(df)
+    df_duplicated = (
+        df[
+            df.duplicated(
+                subset=[
+                    "organization",
+                    "model",
+                ],
+                keep=False,
+            )
+        ]
+        .copy()
+        .reset_index(drop=True)
+    )
+    if df_duplicated.empty:
+        return df
+    df = df.drop_duplicates(
+        subset=[
+            "organization",
+            "model",
+        ],
+        keep=False,
+        ignore_index=True,
+    )
+    print()
+    print("-" * 100)
+    print(sorted(df_duplicated.columns))
+    with pd.option_context("display.max_rows", None):
+        print(
+            df_duplicated[
+                [
+                    "organization",
+                    "model",
+                    "forecast_due_date",
+                ]
+            ].sort_values(
+                by=[
+                    "organization",
+                    "model",
+                    "forecast_due_date",
+                ]
+            )
+        )
+    print("-" * 100)
+    print()
+    df_duplicated = merge_duplicates(df_duplicated)
+    return pd.concat([df, df_duplicated], ignore_index=True)
+
+
+def merge_common_models(leaderboard):
+    """Merge common models for all leaderboards."""
+    for key in leaderboard.keys():
+        print(key)
+        leaderboard[key] = merge_common_models_for_leaderboard(leaderboard[key])
+
+    return leaderboard
+
+
+def make_leaderboard(df, title, basename):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = pd.DataFrame(d)
-    df = get_z_scores(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -997,7 +1139,7 @@ def worker(task):
     """Pool worker for leaderboard creation."""
     try:
         return make_leaderboard(
-            d=task["d"],
+            df=task["df"],
             title=task["title"],
             basename=task["basename"],
         )
@@ -1016,36 +1158,55 @@ def driver(_):
     # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json")]
-    # files = [
-    #     # '2024-07-21/2024-07-21.ForecastBench.always-0.5.json',
-    #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
-    #     # '2024-07-21/2024-07-21.ForecastBench.always-1.json',
-    #     # '2024-07-21/2024-07-21.ForecastBench.human_public.json',
-    #     "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-    #     # '2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json',
-    #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
-    #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
-    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
-    #     # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
-    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
-    #     "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
-    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json',
-    # ]
-    logger.info(f"Have access to {env.NUM_CPUS}.")
-    for f in files:
-        logger.info(f"Downloading, reading, and scoring forecasts in `{f}`...")
+    files1 = [
+        # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
+        "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+        # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+        # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+        # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+        # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+        "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+        # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+        "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+        # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+        # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+        "2024-12-08/2024-12-08.ForecastBench.always-0.json",
+        # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
+        # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
+        "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
+        # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
+        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
+        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
+        "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+        "2025-03-02/2025-03-02.ForecastBench.always-0.json",
+        "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+    ]
 
-        data = download_and_read_processed_forecast_file(filename=f)
+    with ThreadPoolExecutor() as executor:
+        dfs = list(
+            tqdm(
+                executor.map(
+                    download_and_read_processed_forecast_file,
+                    files,
+                ),
+                total=len(files),
+                desc="downloading processed forecast files",
+            )
+        )
+        executor.shutdown(wait=True)
+
+    # dfs = {k:v for d in dfs for k,v in d.items()}
+    logger.info(f"Have access to {env.NUM_CPUS} CPU.")
+    for d in dfs:
+        f, data = next(iter(d.items()))
+        logger.info(f"Scoring forecasts in `{f}`...")
+
+        # data = download_and_read_processed_forecast_file(filename=f)
         if not data or not isinstance(data, dict):
             logger.warning(f"Problem processing {f}. First `continue`.")
             continue
@@ -1115,37 +1276,41 @@ def driver(_):
         # )
 
     title = "Leaderboard: overall"
+
+    llm_leaderboard = merge_common_models(llm_leaderboard)
+    llm_and_human_leaderboard = merge_common_models(llm_and_human_leaderboard)
+
     tasks = [
         {
-            "d": llm_leaderboard["overall"],
+            "df": llm_leaderboard["overall"],
             "title": title,
             "basename": "leaderboard_overall",
         },
         {
-            "d": llm_and_human_leaderboard["overall"],
+            "df": llm_and_human_leaderboard["overall"],
             "title": f"Human {title}",
             "basename": "human_leaderboard_overall",
         },
-        {
-            "d": llm_and_human_leaderboard["7"],
-            "title": f"Human {title} 7 day",
-            "basename": "human_leaderboard_overall_7",
-        },
-        {
-            "d": llm_and_human_leaderboard["30"],
-            "title": f"Human {title} 30 day",
-            "basename": "human_leaderboard_overall_30",
-        },
-        {
-            "d": llm_and_human_leaderboard["90"],
-            "title": f"Human {title} 90 day",
-            "basename": "human_leaderboard_overall_90",
-        },
-        {
-            "d": llm_and_human_leaderboard["180"],
-            "title": f"Human {title} 180 day",
-            "basename": "human_leaderboard_overall_180",
-        },
+        # {
+        #     "d": llm_and_human_leaderboard["7"],
+        #     "title": f"Human {title} 7 day",
+        #     "basename": "human_leaderboard_overall_7",
+        # },
+        # {
+        #     "d": llm_and_human_leaderboard["30"],
+        #     "title": f"Human {title} 30 day",
+        #     "basename": "human_leaderboard_overall_30",
+        # },
+        # {
+        #     "d": llm_and_human_leaderboard["90"],
+        #     "title": f"Human {title} 90 day",
+        #     "basename": "human_leaderboard_overall_90",
+        # },
+        # {
+        #     "d": llm_and_human_leaderboard["180"],
+        #     "title": f"Human {title} 180 day",
+        #     "basename": "human_leaderboard_overall_180",
+        # },
         # {
         #     "d": llm_and_human_combo_leaderboard["overall"],
         #     "title": f"Human Combo {title}",

@@ -13,10 +13,12 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.stats import norm
 from termcolor import colored
 from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
 from helpers import (  # noqa: E402
     constants,
     decorator,
@@ -133,6 +135,19 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
     pct_imputed = int(
         np.round(df[(data_mask & resolved_mask) | market_mask]["imputed"].mean() * 100)
     )
+
+    # plt.figure(figsize=(10, 6))
+    # plt.hist(df['score'], bins=30, alpha=0.7, edgecolor='k')
+    # plt.title(f"Distribution of Raw Brier Scores {org_and_model['model']}")
+    # plt.xlabel("Brier Score")
+    # plt.ylabel("Frequency")
+    # plt.show()
+
+    # # Q-Q plot to check for normality
+    # plt.figure(figsize=(10, 6))
+    # stats.probplot(df['score'], dist="norm", plot=plt)
+    # plt.title(f"Q-Q Plot of Raw Brier Scores {org_and_model['model']}")
+    # plt.show()
 
     return {
         "data": data_resolved_score,
@@ -466,14 +481,14 @@ def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, questi
         org_and_model | get_leaderboard_entry(df, forecast_due_date, question_set_filename)
     ]
     leaderboard["overall"] = leaderboard.get("overall", []) + leaderboard_entry
-    for horizon in df["horizon"].unique():
-        leaderboard_entry = [
-            org_and_model
-            | get_leaderboard_entry(
-                df[df["horizon"] == horizon].copy(), forecast_due_date, question_set_filename
-            )
-        ]
-        leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
+    # for horizon in df["horizon"].unique():
+    #     leaderboard_entry = [
+    #         org_and_model
+    #         | get_leaderboard_entry(
+    #             df[df["horizon"] == horizon].copy(), forecast_due_date, question_set_filename
+    #         )
+    #     ]
+    #     leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
 def add_to_llm_leaderboard(*args, **kwargs):
@@ -1068,7 +1083,9 @@ def create_naive_forecaster_leaderboard_entries(df_naive_forecaster):
     }
     for r in range(2, len(unique_forecast_due_dates) + 1):
         for combo in itertools.combinations(unique_forecast_due_dates, r):
-            df_tmp = df_naive_forecaster[df_naive_forecaster["forecast_due_date"].isin(combo)]
+            df_tmp = df_naive_forecaster[
+                df_naive_forecaster["forecast_due_date"].isin(combo)
+            ].copy()
             df_combined, forecast_due_dates, question_set_filenames = (
                 prep_combo_for_get_leaderboard_entry_call(df_tmp)
             )
@@ -1142,50 +1159,168 @@ def merge_common_models(df):
 
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 10
+    n_replications = 1000
     mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
     bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
+
+    def sample(
+        df,
+        mask,
+    ):
+        for source in df[mask]["source"].unique():
+            source_mask = mask & (df["source"] == source)
+            df.loc[source_mask, "score"] = (
+                df.loc[source_mask, "score"]
+                .sample(
+                    n=source_mask.sum(),
+                    replace=True,
+                    ignore_index=True,
+                )
+                .to_numpy()
+            )
+        return df
+
+    def sample_block_indices_by_source(df, mask):
+        sampled_indices = {}
+        for source in df[mask]["source"].unique():
+            source_mask = mask & (df["source"] == source)
+            available_indices = df.loc[source_mask].index.to_numpy()
+            sampled_indices[source] = np.random.choice(
+                available_indices, size=len(available_indices), replace=True
+            )
+        return sampled_indices
+
+    def sample_block_indices_no_source(df, mask):
+        available_indices = df.loc[mask].index.to_numpy()
+        sampled_indices = np.random.choice(
+            available_indices, size=len(available_indices), replace=True
+        )
+        return sampled_indices
+
+    def get_sample_indices(df, forecast_due_date, sample_indices):
+        if forecast_due_date in sample_indices.keys():
+            return sample_indices[forecast_due_date]
+
+        resolved_mask = df["resolved"].astype(bool)
+        data_mask = (df["source"].isin(question_curation.DATA_SOURCES)) & (resolved_mask)
+        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
+        market_drop_duplicates_mask = ~df.duplicated(
+            [
+                "id",
+                "source",
+                "direction",
+                "forecast_due_date",
+            ]
+        )
+        market_mask = market_source_mask & market_drop_duplicates_mask
+        market_resolved_mask = market_mask & (resolved_mask)
+        market_unresolved_mask = market_mask & (~resolved_mask)
+
+        sampled_indices = {}
+        sampled_indices["data"] = sample_block_indices_by_source(df, data_mask)
+        sampled_indices["market_resolved"] = sample_block_indices_no_source(
+            df, market_resolved_mask
+        )
+        sampled_indices["market_unresolved"] = sample_block_indices_no_source(
+            df, market_unresolved_mask
+        )
+        sample_indices[forecast_due_date] = sampled_indices
+
+        return sampled_indices
+
+    def apply_sample_indices(df, indices):
+        df_updated = df.copy()
+        # For each block, update the score column in place.
+
+        resolved_mask = df["resolved"].astype(bool)
+        data_mask = (df["source"].isin(question_curation.DATA_SOURCES)) & (resolved_mask)
+        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
+        market_drop_duplicates_mask = ~df.duplicated(
+            [
+                "id",
+                "source",
+                "direction",
+                "forecast_due_date",
+            ]
+        )
+        market_mask = market_source_mask & market_drop_duplicates_mask
+        market_resolved_mask = market_mask & (resolved_mask)
+        market_unresolved_mask = market_mask & (~resolved_mask)
+
+        for block, sources in indices.items():
+            # Define the mask for the block.
+            # Here you must know how each block is defined. For example:
+            if block == "data":
+                block_mask = data_mask
+            elif block == "market_resolved":
+                block_mask = market_resolved_mask
+            elif block == "market_unresolved":
+                block_mask = market_unresolved_mask
+            else:
+                raise ValueError("should not arrive here (3).")
+
+            if block == "data":
+                for source in sources:
+                    boot_indices = sources[source]
+                    source_block_mask = block_mask & (df["source"] == source)
+                    # print(source, boot_indices)
+
+                    # Get the original indices for this block in the order they appear in df.
+                    orig_indices = df_updated.loc[source_block_mask].index
+
+                    # Now, retrieve the bootstrapped score values.
+                    # We use reset_index(drop=True) so that they are assigned by position.
+                    new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
+
+                    # Ensure the length matches: it should be the same as the number of rows in this block.
+                    # print(len(orig_indices), len(new_scores))
+                    assert len(orig_indices) == len(new_scores), (
+                        "Mismatch in number of rows for block: " + block
+                    )
+
+                    # Update the score column for these rows.
+                    df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
+            else:
+                boot_indices = sources
+                orig_indices = df_updated.loc[block_mask].index
+                new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
+                assert len(orig_indices) == len(new_scores), (
+                    "Mismatch in number of rows for block: " + block
+                )
+                df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
+
+        return df_updated
+
+    original_BSS = {
+        (row["organization"], row["model"]): row["BSS_wrt_naive_mean"] for _, row in df.iterrows()
+    }
+
     for _ in range(n_replications):
+        leaderboard = []
+
         # Duplicate df with sampled scores for all models
         df_tmp = df.copy()
+
         # Drop combination of naive forecasters
         # These should be recreated from the resampled individual naive forecasters
         df_tmp = df_tmp[
             ~(mask_naive_forecaster & df_tmp["question_set"].apply(lambda x: isinstance(x, tuple)))
         ].reset_index(drop=True)
-        leaderboard = []
+
+        sample_indices = {}
+
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
-            data_mask = (df_model["source"].isin(question_curation.DATA_SOURCES)) & (df_model["resolved"].astype(bool))
-            market_source_mask = df_model["source"].isin(question_curation.MARKET_SOURCES)
-            market_drop_duplicates_mask = ~df_model.duplicated(
-                [
-                    "id",
-                    "source",
-                    "direction",
-                    "forecast_due_date",
-                ]
-            )
-            market_mask = market_source_mask & market_drop_duplicates_mask
-            for mask in [data_mask, market_mask]:
-                df_model.loc[mask, "score"] = (
-                    df_model.loc[mask, "score"]
-                    .sample(
-                        n=mask.sum(),
-                        replace=True,
-                        ignore_index=True,
-                    )
-                    .to_numpy()
-                )
-            org_and_model = {
-                "organization": row["organization"],
-                "model": row["model"],
-            }
+            indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
+            df_model = apply_sample_indices(df_model, indices)
             leaderboard += [
-                org_and_model
+                {
+                    "organization": row["organization"],
+                    "model": row["model"],
+                }
                 | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
             ]
 
@@ -1214,8 +1349,51 @@ def bootstrap_BSS_CI(df):
 
     ci_results = {}
     for key, bss_values in bootstrap_results.items():
-        lower, upper = np.percentile(bss_values, [2.5, 97.5])
+        alpha = (1 - CONFIDENCE_LEVEL) / 2
+        lower = np.percentile(bss_values, alpha * 100)
+        upper = np.percentile(bss_values, (1 - alpha) * 100)
         ci_results[key] = (lower, upper)
+
+    # ci_results = {}
+    # for key, bss_values in bootstrap_results.items():
+    #     bss_values = np.array(bss_values)
+    #     print(key, bss_values)
+    #     print()
+
+    #     if key == ("ForecastBench", "Naive Forecaster"):
+    #         ci_results[key] = (0.0, 0.0)
+    #         continue
+
+    #     # Original statistic for this key (must be computed from your non-bootstrapped data)
+    #     theta_hat = original_BSS[key]
+
+    #     # Compute bias-correction factor: proportion of bootstrap replicates below theta_hat
+    #     p = np.mean(bss_values < theta_hat)
+    #     z0 = norm.ppf(p)
+
+    #     # Compute the acceleration factor via jackknife.
+    #     # Here we compute jackknife estimates by leaving one replicate out at a time.
+    #     jackknife_estimates = np.array(
+    #         [np.mean(np.delete(bss_values, i)) for i in range(len(bss_values))]
+    #     )
+    #     jack_mean = np.mean(jackknife_estimates)
+    #     num = np.sum((jack_mean - jackknife_estimates) ** 3)
+    #     denom = 6 * (np.sum((jack_mean - jackknife_estimates) ** 2)) ** 1.5
+    #     a = num / denom if denom != 0 else 0
+
+    #     # For a 95% CI:
+    #     alpha = 1 - CONFIDENCE_LEVEL
+    #     z_low = norm.ppf(alpha / 2)
+    #     z_high = norm.ppf(1 - alpha / 2)
+
+    #     # Adjust the quantiles using the BCa formulas:
+    #     adj_low = norm.cdf(z0 + (z0 + z_low) / (1 - a * (z0 + z_low)))
+    #     adj_high = norm.cdf(z0 + (z0 + z_high) / (1 - a * (z0 + z_high)))
+
+    #     # Get the adjusted percentiles from the bootstrap replicates:
+    #     CI_lower = np.percentile(bss_values, adj_low * 100)
+    #     CI_upper = np.percentile(bss_values, adj_high * 100)
+    #     ci_results[key] = (CI_lower, CI_upper)
 
     def assign_ci(row):
         key = (row["organization"], row["model"])
@@ -1276,34 +1454,34 @@ def driver(_):
     # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json")]
-    # files1 = [
-    #     # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
-    #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
-    #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
-    #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
-    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
-    #     # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
-    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
-    #     "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
-    #     # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
-    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
-    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
-    #     "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
-    #     "2025-03-02/2025-03-02.ForecastBench.always-0.json",
-    #     "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
-    # ]
+    files1 = [
+        # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
+        "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+        # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+        # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+        # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+        # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+        "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+        # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+        "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+        # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+        # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+        "2024-12-08/2024-12-08.ForecastBench.always-0.json",
+        # '2024-12-08/2024-12-08.ForecastBench.always-1.json',
+        # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
+        "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
+        # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
+        # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
+        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
+        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
+        "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+        "2025-03-02/2025-03-02.ForecastBench.always-0.json",
+        "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+    ]
 
     with ThreadPoolExecutor() as executor:
         dfs = list(
@@ -1362,6 +1540,19 @@ def driver(_):
             lambda delta: delta.days
         )
 
+        data_mask = df["source"].isin(question_curation.DATA_SOURCES)
+        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
+        market_drop_duplicates_mask = ~df.duplicated(
+            [
+                "id",
+                "source",
+                "direction",
+                "forecast_due_date",
+            ]
+        )
+        market_mask = market_source_mask & market_drop_duplicates_mask
+        df = df[data_mask | market_mask].reset_index(drop=True)
+
         org_and_model = {"organization": organization, "model": model}
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
@@ -1395,11 +1586,11 @@ def driver(_):
 
     title = "Leaderboard: overall"
     tasks = [
-        # {
-        #     "leaderboard": llm_leaderboard["overall"],
-        #     "title": title,
-        #     "basename": "leaderboard_overall",
-        # },
+        {
+            "leaderboard": llm_leaderboard["overall"],
+            "title": title,
+            "basename": "leaderboard_overall",
+        },
         # {
         #     "leaderboard": llm_and_human_leaderboard["overall"],
         #     "title": f"Human {title}",

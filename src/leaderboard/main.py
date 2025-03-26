@@ -9,6 +9,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
@@ -1159,7 +1160,7 @@ def merge_common_models(df):
 
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 1000
+    n_replications = 500
     mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
@@ -1416,12 +1417,61 @@ def bootstrap_BSS_CI(df):
     return df
 
 
+def impute_BSS_CI(df):
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    df_tmp = df.copy()
+    df_tmp["tuple_length"] = df_tmp["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
+    )
+    df_tmp = df_tmp[df_tmp["tuple_length"] == df_tmp["tuple_length"].max()]
+    df_tmp = df_tmp[~mask_naive_forecaster]
+
+    z = norm.ppf(1 - (1 - CONFIDENCE_LEVEL) / 2)
+    print(z)
+    rel_uncertainties = []
+    for _, row in df_tmp.iterrows():
+        lower, upper = row["bootstrap_BSS_CI"]
+        print(lower, upper)
+        se = (upper - lower) / (2 * z)
+        rel_uncertainty = se / abs(row["BSS_wrt_naive_mean"])
+        rel_uncertainties.append(rel_uncertainty)
+    relative_uncertainty = np.mean(rel_uncertainties)
+
+    def impute_cis(bss, relative_uncertainty):
+        imputed_se = relative_uncertainty * abs(bss)
+        ci = bss - z * imputed_se, bss + z * imputed_se
+        return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+
+    non_human_forecast_bench_models = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        ~df["model"].isin(["Superforecaster median forecast", "Public median forecast"])
+    )
+    models_to_exclude = set(df_tmp[["organization", "model"]].apply(tuple, axis=1))
+    mask_impute_to = (
+        ~df[["organization", "model"]]
+        .apply(lambda row: (row["organization"], row["model"]), axis=1)
+        .isin(models_to_exclude)
+    ) & ~non_human_forecast_bench_models
+
+    print("printing mask impute to cols")
+    print(df[mask_impute_to])
+    df["relative_uncertainty"] = relative_uncertainty
+    df["imputed_BSS_CI"] = df["bootstrap_BSS_CI"]
+    df.loc[mask_impute_to, "imputed_BSS_CI"] = df.loc[mask_impute_to, "BSS_wrt_naive_mean"].apply(
+        impute_cis, args=(relative_uncertainty,)
+    )
+    print(df)
+    return df
+
+
 def make_leaderboard(leaderboard, title, basename):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
     df = pd.DataFrame(leaderboard)
     df = merge_common_models(df)
     df = bootstrap_BSS_CI(df)
+    df = impute_BSS_CI(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -1452,9 +1502,9 @@ def driver(_):
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
-    files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    files = [file for file in files if file.endswith(".json")]
-    files1 = [
+    #files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
+    #files = [file for file in files if file.endswith(".json")]
+    files = [
         # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
         "2024-07-21/2024-07-21.ForecastBench.always-0.json",
         # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
@@ -1478,6 +1528,7 @@ def driver(_):
         # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
         "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
         "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
+        "2024-12-08/2024-12-08.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
         "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
         "2025-03-02/2025-03-02.ForecastBench.always-0.json",
         "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
@@ -1557,6 +1608,7 @@ def driver(_):
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
+        pprint(org_and_model)
         if not is_human_forecast_set:
             add_to_llm_leaderboard(
                 llm_leaderboard,
@@ -1573,7 +1625,7 @@ def driver(_):
             cache,
             question_set_filename=question_set_filename,
         )
-
+        print()
         # add_to_llm_and_human_combo_leaderboards(
         #     llm_and_human_combo_leaderboard,
         #     org_and_model,

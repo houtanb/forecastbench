@@ -65,10 +65,13 @@ def download_and_read_processed_forecast_file(filename):
     return {filename: data}
 
 
-def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
-    """Create the leaderboard entry for the given dataframe."""
-    # Masks
-    data_mask = df["source"].isin(question_curation.DATA_SOURCES)
+def get_masks(df):
+    masks = {}
+
+    resolved_mask = df["resolved"].astype(bool)
+    unresolved_mask = ~resolved_mask
+
+    masks["data"] = df["source"].isin(question_curation.DATA_SOURCES) & resolved_mask
 
     # Market sources should be reduced to the value at a single date. This is because we always
     # evaluate to the latest market value or the resolution value for a market and orgs only
@@ -82,26 +85,38 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
             "forecast_due_date",
         ]
     )
-    market_mask = market_source_mask & market_drop_duplicates_mask
+    masks["market"] = market_source_mask & market_drop_duplicates_mask
+    masks["market_resolved"] = masks["market"] & resolved_mask
+    masks["market_unresolved"] = masks["market"] & unresolved_mask
 
-    resolved_mask = df["resolved"].astype(bool)
-    unresolved_mask = ~resolved_mask
+    return masks
+
+
+def get_naive_forecaster_mask(df):
+    return (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+
+
+
+def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
+    """Create the leaderboard entry for the given dataframe."""
 
     def get_scores(df, mask):
         scores = df[mask]["score"]
         return scores.mean(), len(scores)
 
+    masks = get_masks(df)
+
     # Datasets
-    data_resolved_score, n_data_resolved = get_scores(df, data_mask & resolved_mask)
-    data_resolved_std_dev = df[data_mask & resolved_mask]["score"].std(ddof=1)
-    data_resolved_se = data_resolved_std_dev / np.sqrt(n_data_resolved)
+    data_resolved_score, n_data_resolved = get_scores(df, masks["data"])
+    data_resolved_std_dev = df[masks["data"]]["score"].std(ddof=1)
 
     # Markets
-    market_resolved_score, n_market_resolved = get_scores(df, market_mask & resolved_mask)
-    market_unresolved_score, n_market_unresolved = get_scores(df, market_mask & unresolved_mask)
-    market_overall_score, n_market_overall = get_scores(df, market_mask)
-    market_overall_std_dev = df[market_mask]["score"].std(ddof=1)
-    market_overall_se = market_overall_std_dev / np.sqrt(n_market_overall)
+    market_resolved_score, n_market_resolved = get_scores(df, masks["market_resolved"])
+    market_unresolved_score, n_market_unresolved = get_scores(df, masks["market_unresolved"])
+    market_overall_score, n_market_overall = get_scores(df, masks["market"])
+    market_overall_std_dev = df[masks["market"]]["score"].std(ddof=1)
 
     # Overall Resolved
     overall_resolved_score = (
@@ -114,7 +129,6 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
     # Overall
     overall_score = (data_resolved_score + market_overall_score) / 2
     n_overall = n_data_resolved + n_market_overall
-    overall_se = np.sqrt(data_resolved_se**2 + market_overall_se**2) / 2
     overall_std_dev = (
         np.sqrt(
             data_resolved_std_dev**2 / n_data_resolved
@@ -123,32 +137,10 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
         / 2
     )
 
-    # Overall CI
-    conservative_dof = min(n_data_resolved, n_market_overall) - 1
-    confidence_interval = np.round(
-        stats.t.interval(
-            confidence=CONFIDENCE_LEVEL, df=conservative_dof, loc=overall_score, scale=overall_se
-        ),
-        LEADERBOARD_DECIMAL_PLACES,
-    )
-
     # % imputed
     pct_imputed = int(
         np.round(df[(data_mask & resolved_mask) | market_mask]["imputed"].mean() * 100)
     )
-
-    # plt.figure(figsize=(10, 6))
-    # plt.hist(df['score'], bins=30, alpha=0.7, edgecolor='k')
-    # plt.title(f"Distribution of Raw Brier Scores {org_and_model['model']}")
-    # plt.xlabel("Brier Score")
-    # plt.ylabel("Frequency")
-    # plt.show()
-
-    # # Q-Q plot to check for normality
-    # plt.figure(figsize=(10, 6))
-    # stats.probplot(df['score'], dist="norm", plot=plt)
-    # plt.title(f"Q-Q Plot of Raw Brier Scores {org_and_model['model']}")
-    # plt.show()
 
     return {
         "data": data_resolved_score,
@@ -163,7 +155,6 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
         "n_overall_resolved": n_overall_resolved,
         "overall": overall_score,
         "overall_std_dev": overall_std_dev,
-        "confidence_interval_overall": confidence_interval,
         "n_overall": n_overall,
         "pct_imputed": pct_imputed,
         "df": df.copy(),
@@ -1056,10 +1047,6 @@ def get_BSS(df):
         mask_forecast_due_date = df["forecast_due_date"] == forecast_due_date
         naive_mask = mask_naive_forecaster & mask_forecast_due_date
         naive_baseline_mean = df[naive_mask]["overall"].values[0]
-        # naive_std_dev = df[naive_mask]["overall_std_dev"].values[0]
-        # df.loc[mask_forecast_due_date, "z_score_wrt_naive_mean"] = (
-        #     df[mask_forecast_due_date]["overall"] - naive_baseline_mean
-        # ) / naive_std_dev
         df.loc[mask_forecast_due_date, "BSS_wrt_naive_mean"] = (
             1 - df[mask_forecast_due_date]["overall"] / naive_baseline_mean
         )
@@ -1160,31 +1147,15 @@ def merge_common_models(df):
 
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 500
+    n_replications = 3
     mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
     bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
 
-    def sample(
-        df,
-        mask,
-    ):
-        for source in df[mask]["source"].unique():
-            source_mask = mask & (df["source"] == source)
-            df.loc[source_mask, "score"] = (
-                df.loc[source_mask, "score"]
-                .sample(
-                    n=source_mask.sum(),
-                    replace=True,
-                    ignore_index=True,
-                )
-                .to_numpy()
-            )
-        return df
-
     def sample_block_indices_by_source(df, mask):
+        """Sample everything where mask is true, source by source."""
         sampled_indices = {}
         for source in df[mask]["source"].unique():
             source_mask = mask & (df["source"] == source)
@@ -1195,6 +1166,7 @@ def bootstrap_BSS_CI(df):
         return sampled_indices
 
     def sample_block_indices_no_source(df, mask):
+        """Sample everything where mask is true."""
         available_indices = df.loc[mask].index.to_numpy()
         sampled_indices = np.random.choice(
             available_indices, size=len(available_indices), replace=True
@@ -1202,104 +1174,70 @@ def bootstrap_BSS_CI(df):
         return sampled_indices
 
     def get_sample_indices(df, forecast_due_date, sample_indices):
+        """Get the indices for the given forecast due date."""
         if forecast_due_date in sample_indices.keys():
             return sample_indices[forecast_due_date]
 
-        resolved_mask = df["resolved"].astype(bool)
-        data_mask = (df["source"].isin(question_curation.DATA_SOURCES)) & (resolved_mask)
-        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
-        market_drop_duplicates_mask = ~df.duplicated(
-            [
-                "id",
-                "source",
-                "direction",
-                "forecast_due_date",
-            ]
-        )
-        market_mask = market_source_mask & market_drop_duplicates_mask
-        market_resolved_mask = market_mask & (resolved_mask)
-        market_unresolved_mask = market_mask & (~resolved_mask)
+        masks = get_masks(df)
 
         sampled_indices = {}
-        sampled_indices["data"] = sample_block_indices_by_source(df, data_mask)
+        sampled_indices["data"] = sample_block_indices_by_source(df, masks["data"])
         sampled_indices["market_resolved"] = sample_block_indices_no_source(
-            df, market_resolved_mask
+            df, masks["market_resolved"],
         )
         sampled_indices["market_unresolved"] = sample_block_indices_no_source(
-            df, market_unresolved_mask
+            df, masks["market_unresolved"],
         )
         sample_indices[forecast_due_date] = sampled_indices
 
         return sampled_indices
 
     def apply_sample_indices(df, indices):
+        """Apply the sample provided to df."""
         df_updated = df.copy()
         # For each block, update the score column in place.
 
-        resolved_mask = df["resolved"].astype(bool)
-        data_mask = (df["source"].isin(question_curation.DATA_SOURCES)) & (resolved_mask)
-        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
-        market_drop_duplicates_mask = ~df.duplicated(
-            [
-                "id",
-                "source",
-                "direction",
-                "forecast_due_date",
-            ]
-        )
-        market_mask = market_source_mask & market_drop_duplicates_mask
-        market_resolved_mask = market_mask & (resolved_mask)
-        market_unresolved_mask = market_mask & (~resolved_mask)
+        masks = get_masks(df)
 
         for block, sources in indices.items():
             # Define the mask for the block.
             # Here you must know how each block is defined. For example:
-            if block == "data":
-                block_mask = data_mask
-            elif block == "market_resolved":
-                block_mask = market_resolved_mask
-            elif block == "market_unresolved":
-                block_mask = market_unresolved_mask
-            else:
+            if block not in masks.keys():
                 raise ValueError("should not arrive here (3).")
 
             if block == "data":
                 for source in sources:
                     boot_indices = sources[source]
-                    source_block_mask = block_mask & (df["source"] == source)
-                    # print(source, boot_indices)
+                    source_block_mask = masks[block] & (df["source"] == source)
 
-                    # Get the original indices for this block in the order they appear in df.
                     orig_indices = df_updated.loc[source_block_mask].index
-
-                    # Now, retrieve the bootstrapped score values.
-                    # We use reset_index(drop=True) so that they are assigned by position.
                     new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
-
-                    # Ensure the length matches: it should be the same as the number of rows in this block.
-                    # print(len(orig_indices), len(new_scores))
-                    assert len(orig_indices) == len(new_scores), (
-                        "Mismatch in number of rows for block: " + block
-                    )
-
-                    # Update the score column for these rows.
+                    assert len(orig_indices) == len(
+                        new_scores
+                    ), "Mismatch in number of rows for data block"
                     df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
             else:
                 boot_indices = sources
-                orig_indices = df_updated.loc[block_mask].index
+                orig_indices = df_updated.loc[masks[block]].index
                 new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
-                assert len(orig_indices) == len(new_scores), (
-                    "Mismatch in number of rows for block: " + block
-                )
+                assert len(orig_indices) == len(
+                    new_scores
+                ), "Mismatch in number of rows for market block"
                 df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
 
         return df_updated
 
-    original_BSS = {
-        (row["organization"], row["model"]): row["BSS_wrt_naive_mean"] for _, row in df.iterrows()
-    }
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    model_to_plot = "O1-Preview-2024-09-12 (zero shot)"
+    i=0
+    first_print = True
+    bootstrap_colors = plt.cm.Blues(np.linspace(0.3, 0.7, 9000))  # optional: fade blues
 
     for _ in range(n_replications):
+        print(f"Replication {_}")
         leaderboard = []
 
         # Duplicate df with sampled scores for all models
@@ -1315,8 +1253,15 @@ def bootstrap_BSS_CI(df):
 
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
+            if row["model"]==model_to_plot and first_print:
+                ax.plot(df_model["score"].values, color='black', label='Original', linewidth=2)
+                first_print=False
+
             indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
             df_model = apply_sample_indices(df_model, indices)
+            if row["model"]==model_to_plot:
+                ax.plot(df_model["score"].values, color=bootstrap_colors[n_replications], alpha=0.4, label=None)
+
             leaderboard += [
                 {
                     "organization": row["organization"],
@@ -1325,8 +1270,7 @@ def bootstrap_BSS_CI(df):
                 | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
             ]
 
-        # Get df_naive_forecaster from the leaderboard entries to obtain the correct dfs to
-        # concatenate to create df_combined below
+
         df_leaderboard = pd.DataFrame(leaderboard)
         df_naive_forecaster = (
             df_leaderboard[
@@ -1348,53 +1292,16 @@ def bootstrap_BSS_CI(df):
             bss_value = row["BSS_wrt_naive_mean"]
             bootstrap_results.setdefault(key, []).append(bss_value)
 
+
+    plt.tight_layout()
+    plt.show()
+
     ci_results = {}
     for key, bss_values in bootstrap_results.items():
         alpha = (1 - CONFIDENCE_LEVEL) / 2
         lower = np.percentile(bss_values, alpha * 100)
         upper = np.percentile(bss_values, (1 - alpha) * 100)
         ci_results[key] = (lower, upper)
-
-    # ci_results = {}
-    # for key, bss_values in bootstrap_results.items():
-    #     bss_values = np.array(bss_values)
-    #     print(key, bss_values)
-    #     print()
-
-    #     if key == ("ForecastBench", "Naive Forecaster"):
-    #         ci_results[key] = (0.0, 0.0)
-    #         continue
-
-    #     # Original statistic for this key (must be computed from your non-bootstrapped data)
-    #     theta_hat = original_BSS[key]
-
-    #     # Compute bias-correction factor: proportion of bootstrap replicates below theta_hat
-    #     p = np.mean(bss_values < theta_hat)
-    #     z0 = norm.ppf(p)
-
-    #     # Compute the acceleration factor via jackknife.
-    #     # Here we compute jackknife estimates by leaving one replicate out at a time.
-    #     jackknife_estimates = np.array(
-    #         [np.mean(np.delete(bss_values, i)) for i in range(len(bss_values))]
-    #     )
-    #     jack_mean = np.mean(jackknife_estimates)
-    #     num = np.sum((jack_mean - jackknife_estimates) ** 3)
-    #     denom = 6 * (np.sum((jack_mean - jackknife_estimates) ** 2)) ** 1.5
-    #     a = num / denom if denom != 0 else 0
-
-    #     # For a 95% CI:
-    #     alpha = 1 - CONFIDENCE_LEVEL
-    #     z_low = norm.ppf(alpha / 2)
-    #     z_high = norm.ppf(1 - alpha / 2)
-
-    #     # Adjust the quantiles using the BCa formulas:
-    #     adj_low = norm.cdf(z0 + (z0 + z_low) / (1 - a * (z0 + z_low)))
-    #     adj_high = norm.cdf(z0 + (z0 + z_high) / (1 - a * (z0 + z_high)))
-
-    #     # Get the adjusted percentiles from the bootstrap replicates:
-    #     CI_lower = np.percentile(bss_values, adj_low * 100)
-    #     CI_upper = np.percentile(bss_values, adj_high * 100)
-    #     ci_results[key] = (CI_lower, CI_upper)
 
     def assign_ci(row):
         key = (row["organization"], row["model"])
@@ -1502,8 +1409,8 @@ def driver(_):
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
-    #files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    #files = [file for file in files if file.endswith(".json")]
+    # files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
+    # files = [file for file in files if file.endswith(".json")]
     files = [
         # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
         "2024-07-21/2024-07-21.ForecastBench.always-0.json",
@@ -1591,18 +1498,8 @@ def driver(_):
             lambda delta: delta.days
         )
 
-        data_mask = df["source"].isin(question_curation.DATA_SOURCES)
-        market_source_mask = df["source"].isin(question_curation.MARKET_SOURCES)
-        market_drop_duplicates_mask = ~df.duplicated(
-            [
-                "id",
-                "source",
-                "direction",
-                "forecast_due_date",
-            ]
-        )
-        market_mask = market_source_mask & market_drop_duplicates_mask
-        df = df[data_mask | market_mask].reset_index(drop=True)
+        masks = get_masks(df)
+        df = df[masks["data"] | masks["market"]].reset_index(drop=True)
 
         org_and_model = {"organization": organization, "model": model}
         is_human_forecast_set = (
@@ -1638,11 +1535,11 @@ def driver(_):
 
     title = "Leaderboard: overall"
     tasks = [
-        {
-            "leaderboard": llm_leaderboard["overall"],
-            "title": title,
-            "basename": "leaderboard_overall",
-        },
+        # {
+        #     "leaderboard": llm_leaderboard["overall"],
+        #     "title": title,
+        #     "basename": "leaderboard_overall",
+        # },
         # {
         #     "leaderboard": llm_and_human_leaderboard["overall"],
         #     "title": f"Human {title}",

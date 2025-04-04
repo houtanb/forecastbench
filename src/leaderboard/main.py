@@ -5,12 +5,13 @@ import json
 import logging
 import math
 import os
+import pickle
 import sys
 import tempfile
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
-from pprint import pprint
 
 import numpy as np
 import pandas as pd
@@ -309,12 +310,15 @@ def make_and_upload_html_table(df, title, basename):
         return formatted_scores.astype(str) + " (" + formatted_counts.astype(str) + ")"
 
     df["elo_overall"] = df["elo_overall"].round().astype(int)
+    df["elo_data"] = df["elo_data"].round().astype(int)
+    df["elo_market"] = df["elo_market"].round().astype(int)
 
     df = df[
         [
             "Ranking",
             "organization",
             "model",
+            "forecast_due_date",
             "elo_data",
             "elo_market",
             "elo_overall",
@@ -324,9 +328,10 @@ def make_and_upload_html_table(df, title, basename):
         columns={
             "organization": "Organization",
             "model": "Model",
-            "elo_data": "Elo Data",
-            "elo_market": "Elo Market",
-            "elo_overall": "Elo",
+            "forecast_due_date": "Forecast due date(s)",
+            "elo_data": "Elo dataset",
+            "elo_market": "Elo market",
+            "elo_overall": "Elo overall",
         }
     )
 
@@ -409,7 +414,7 @@ def make_and_upload_html_table(df, title, basename):
         render_links=True,
     )
 
-    ORDER_COL_IDX = 5
+    ORDER_COL_IDX = 6
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -523,15 +528,8 @@ def make_and_upload_html_table(df, title, basename):
                     "smart": true
                 },
                 "columnDefs": [
-                    {"""
-        + f"""
-                        "targets": {ORDER_COL_IDX},"""
-        + """
-                        "type": "bss-num",
-                        "orderSequence": ["desc", "asc"]
-                    },
                     {
-                        "targets": 5,
+                        "targets": 0,
                         "className": "right-align"
                     },
                     {
@@ -577,138 +575,42 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
-def compute_mle_elo1(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
-
-    def fill_missing_rows_and_columns(ptbl):
-        all_labels = set(ptbl.index).union(ptbl.columns)
-        return ptbl.reindex(index=all_labels, columns=all_labels, fill_value=0)
-
-    ptbl_a_win = fill_missing_rows_and_columns(
-        pd.pivot_table(
-            df[df["winner"] == "model_a"],
-            index="model_a",
-            columns="model_b",
-            aggfunc="size",
-            fill_value=0,
-        )
-    )
-    print("--" * 50)
-    print("A WIN")
-    with pd.option_context("display.max_rows", None, "display.max_columns", None):
-        print(ptbl_a_win)
-
-    # if no tie, create a zero matrix
-    print("--" * 50)
-    print("TIE")
-    if not (df["winner"] == "tie").any():
-        ptbl_tie = pd.DataFrame(0, index=ptbl_a_win.index, columns=ptbl_a_win.columns)
-    else:
-        ptbl_tie = fill_missing_rows_and_columns(
-            pd.pivot_table(
-                df[df["winner"] == "tie"],
-                index="model_a",
-                columns="model_b",
-                aggfunc="size",
-                fill_value=0,
-            )
-        )
-        ptbl_tie = ptbl_tie + ptbl_tie.T
-        # ptbl_tie = ptbl_tie.fillna(0)
-
-    ptbl_b_win = fill_missing_rows_and_columns(
-        pd.pivot_table(
-            df[df["winner"] == "model_b"],
-            index="model_a",
-            columns="model_b",
-            aggfunc="size",
-            fill_value=0,
-        )
-    )
-    ptbl_win = ptbl_a_win * 2 + ptbl_b_win.T * 2 + ptbl_tie
-    ptbl_win = ptbl_win.fillna(0)
-
-    print("--" * 50)
-    print("B WIN")
-    with pd.option_context("display.max_rows", None, "display.max_columns", None):
-        print(ptbl_b_win)
-
-    models = pd.Series(np.arange(len(ptbl_win.index)), index=ptbl_win.index)
-
-    p = len(models)
-    X = np.zeros([p * (p - 1) * 2, p])
-    Y = np.zeros(p * (p - 1) * 2)
-
-    cur_row = 0
-    sample_weights = []
-    for m_a in ptbl_win.index:
-        for m_b in ptbl_win.columns:
-            if m_a == m_b:
-                continue
-            # if nan skip
-            if math.isnan(ptbl_win.loc[m_a, m_b]) or math.isnan(ptbl_win.loc[m_b, m_a]):
-                continue
-            X[cur_row, models[m_a]] = +math.log(BASE)
-            X[cur_row, models[m_b]] = -math.log(BASE)
-            Y[cur_row] = 1.0
-            sample_weights.append(ptbl_win.loc[m_a, m_b])
-
-            X[cur_row + 1, models[m_a]] = math.log(BASE)
-            X[cur_row + 1, models[m_b]] = -math.log(BASE)
-            Y[cur_row + 1] = 0.0
-            sample_weights.append(ptbl_win.loc[m_b, m_a])
-            cur_row += 2
-    X = X[:cur_row]
-    Y = Y[:cur_row]
-
-    lr = LogisticRegression(fit_intercept=False, penalty=None, tol=1e-6)
-    lr.fit(X, Y, sample_weight=sample_weights)
-    elo_scores = SCALE * lr.coef_[0] + INIT_RATING
-    if "mixtral-8x7b-instruct-v0.1" in models.index:
-        elo_scores += 1114 - elo_scores[models["mixtral-8x7b-instruct-v0.1"]]
-    return pd.Series(elo_scores, index=models.index).sort_values(ascending=False)
-
-
 def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
-    # from here https://colab.research.google.com/drive/1KdwokPjirkTmpO_P1WByFNFiqxWQquwH#scrollTo=mSizG3Pzglte
-    from sklearn.linear_model import LogisticRegression
+    """
+    Compute Elo-like scores using the Bradley-Terry model, as in chatbot arena.
 
-    def fill_missing_rows_and_columns(ptbl):
-        all_labels = set(ptbl.index).union(ptbl.columns)
-        return ptbl.reindex(index=all_labels, columns=all_labels, fill_value=0)
-
-    ptbl_a_win = fill_missing_rows_and_columns(
-        pd.pivot_table(
-            df[df["winner"] == "model_a"],
-            index="model_a",
-            columns="model_b",
-            aggfunc="size",
-            fill_value=0,
-        )
+    Modified from https://colab.research.google.com/drive/1KdwokPjirkTmpO_P1WByFNFiqxWQquwH#scrollTo=mSizG3Pzglte # noqa: B950
+    """
+    ptbl_a_win = pd.pivot_table(
+        df[df["winner"] == "model_a"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
     )
+
     # if no tie, create a zero matrix
     if sum(df["winner"].isin(["tie", "tie (bothbad)"])) == 0:
         ptbl_tie = pd.DataFrame(0, index=ptbl_a_win.index, columns=ptbl_a_win.columns)
     else:
-        ptbl_tie = fill_missing_rows_and_columns(
-            pd.pivot_table(
-                df[df["winner"].isin(["tie", "tie (bothbad)"])],
-                index="model_a",
-                columns="model_b",
-                aggfunc="size",
-                fill_value=0,
-            )
-        )
-        ptbl_tie = ptbl_tie + ptbl_tie.T
-
-    ptbl_b_win = fill_missing_rows_and_columns(
-        pd.pivot_table(
-            df[df["winner"] == "model_b"],
+        ptbl_tie = pd.pivot_table(
+            df[df["winner"].isin(["tie", "tie (bothbad)"])],
             index="model_a",
             columns="model_b",
             aggfunc="size",
             fill_value=0,
         )
+
+        ptbl_tie = ptbl_tie + ptbl_tie.T
+
+    ptbl_b_win = pd.pivot_table(
+        df[df["winner"] == "model_b"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
     )
+
     ptbl_win = ptbl_a_win * 2 + ptbl_b_win.T * 2 + ptbl_tie
 
     models = pd.Series(np.arange(len(ptbl_win.index)), index=ptbl_win.index)
@@ -723,9 +625,10 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         for m_b in ptbl_win.columns:
             if m_a == m_b:
                 continue
-            # if nan skip
+
             if math.isnan(ptbl_win.loc[m_a, m_b]) or math.isnan(ptbl_win.loc[m_b, m_a]):
                 continue
+
             X[cur_row, models[m_a]] = +math.log(BASE)
             X[cur_row, models[m_b]] = -math.log(BASE)
             Y[cur_row] = 1.0
@@ -736,6 +639,7 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
             Y[cur_row + 1] = 0.0
             sample_weights.append(ptbl_win.loc[m_b, m_a])
             cur_row += 2
+
     X = X[:cur_row]
     Y = Y[:cur_row]
 
@@ -744,11 +648,11 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
     elo_scores = SCALE * lr.coef_[0] + INIT_RATING
     if "mixtral-8x7b-instruct-v0.1" in models.index:
         elo_scores += 1114 - elo_scores[models["mixtral-8x7b-instruct-v0.1"]]
-        print("\n\n\nMXTRAL FOUND\n\n\n")
     return pd.Series(elo_scores, index=models.index).sort_values(ascending=False)
 
 
 def combine_rounds(leaderboard, mask_name=None):
+    """Combine dataframes for models across forecasting rounds."""
 
     def mask_model(df):
         return df[get_masks(df)[mask_name]] if mask_name else df
@@ -790,79 +694,71 @@ def combine_rounds(leaderboard, mask_name=None):
                         "direction",
                         "horizon",
                         "forecast_due_date",
-                        # "market_value_on_due_date",
-                        # "resolution_date",
-                        # "resolved",
-                        # "resolved_to",
                     ],
                     suffixes=("_a", "_b"),
                 ).reset_index(drop=True)
                 df_tmp["winner"] = df_tmp.apply(who_won, axis=1)
-
-                #                if get_model_name(value_a)=="ForecastBench;Always 0" or get_model_name(value_b)=="ForecastBench;Always 0":
-                #                    with pd.option_context("display.max_columns", None):
-                #                        print(df_tmp)
-                #                        sys.exit()
-
                 if df_tmp.empty:
                     raise ValueError("This merge should not result in an empty df.")
 
                 combined_data.append(df_tmp)
 
-    import random
-
-    random.shuffle(combined_data)
     return pd.concat(combined_data, axis=0, ignore_index=True)
 
 
 def compute_elos(leaderboard):
-    # Compute data elos
-    import pickle
+    """Compute the Elo scores."""
 
-    data_elos = compute_mle_elo(
-        combine_rounds(
-            leaderboard,
-            "data",
-        )
-    )
-    market_elos = compute_mle_elo(
-        combine_rounds(
-            leaderboard,
-            "market",
-        )
-    )
-    elos = compute_mle_elo(combine_rounds(leaderboard))
+    def compute_chatbot_elos(filename, mask=None):
+        if os.path.exists(filename):
+            with open(filename, "rb") as file:
+                df = pickle.load(file)
+        else:
+            df = combine_rounds(leaderboard, mask)
+            with open(filename, "wb") as file:
+                pickle.dump(df, file)
+        return compute_mle_elo(df)
 
-    with open("elos.pkl", "wb") as file:
-        pickle.dump(elos, file)
-    with open("data_elos.pkl", "wb") as file:
-        pickle.dump(data_elos, file)
-    with open("market_elos.pkl", "wb") as file:
-        pickle.dump(market_elos, file)
-
-    def transform_elos(elos):
-        elos = elos.reset_index(name="elo_overall")
-        elos[["organization", "model"]] = elos["model_a"].str.split(";", expand=True)
-        elos = elos.drop(columns=["model_a"])
-        elos = elos.sort_values(by="elo_overall", ascending=False)
+    def transform_elos(elos, elo_col_name):
+        elos = elos.reset_index(name=elo_col_name)
+        elos[["organization", "model"]] = elos["index"].str.split(";", expand=True)
+        elos = elos.drop(columns=["index"])
+        elos = elos.sort_values(by=elo_col_name, ascending=False)
         elos = elos[
             [
                 "organization",
                 "model",
-                "elo_overall",
+                elo_col_name,
             ]
         ]
         return elos
 
-    data_elos = transform_elos(data_elos)
-    market_elos = transform_elos(market_elos)
-    elos = transform_elos(elos)
+    elo_scores = {}
+    for to_run in ["data", "market", "overall"]:
+        logger.info(f"Running {to_run}.")
+        mask = None if to_run == "overall" else to_run
+        elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}.pkl", mask)
 
-    data_elos = data_elos.rename(columns={"elo_overall": "elo_data"})
-    market_elos = market_elos.rename(columns={"elo_overall": "elo_market"})
+    with open("elo_scores.pkl", "wb") as file:
+        pickle.dump(elo_scores, file)
+
+    data_elos = transform_elos(elo_scores["data"], elo_col_name="elo_data")
+    market_elos = transform_elos(elo_scores["market"], elo_col_name="elo_market")
+    elos = transform_elos(elo_scores["overall"], elo_col_name="elo_overall")
 
     elos = pd.merge(elos, data_elos, on=["organization", "model"]).reset_index(drop=True)
     elos = pd.merge(elos, market_elos, on=["organization", "model"]).reset_index(drop=True)
+
+    model_dates = defaultdict(set)
+    for entry in leaderboard:
+        model_dates[(entry["organization"], entry["model"])].add(entry["forecast_due_date"])
+
+    for key in model_dates:
+        model_dates[key] = sorted(model_dates[key])
+
+    elos["forecast_due_date"] = elos.apply(
+        lambda row: model_dates.get((row["organization"], row["model"]), []), axis=1
+    )
 
     return elos
 
@@ -870,9 +766,8 @@ def compute_elos(leaderboard):
 def make_leaderboard(leaderboard, title, basename):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-
     df = compute_elos(leaderboard)
-    print(df)
+
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -899,6 +794,21 @@ def worker(task):
 @decorator.log_runtime
 def driver(_):
     """Create new leaderboard."""
+    # Shortcut while testing
+    if (
+        os.path.exists("leaderboard.pkl")
+        and os.path.exists("df_data.pkl")
+        and os.path.exists("df_market.pkl")
+        and os.path.exists("df_overall.pkl")
+    ):
+        with open("leaderboard.pkl", "rb") as file:
+            leaderboard = pickle.load(file)
+        return make_leaderboard(
+            leaderboard=leaderboard,
+            title="Human leaderboard",
+            basename="human_leaderboard_overall",
+        )
+
     cache = {}
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
@@ -1071,6 +981,9 @@ def driver(_):
         #     "basename": "human_combo_leaderboard_overall",
         # },
     ]
+
+    with open("leaderboard.pkl", "wb") as file:
+        pickle.dump(llm_and_human_leaderboard["overall"], file)
 
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")
     with Pool(processes=min(len(tasks), env.NUM_CPUS)) as pool:

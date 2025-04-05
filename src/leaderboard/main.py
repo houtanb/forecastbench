@@ -498,21 +498,6 @@ def make_and_upload_html_table(df, title, basename):
         <script>
         """
         + r"""
-        $.fn.dataTable.ext.type.detect.unshift(function(data) {
-            if (/^-?\d+(\.\d+)? \(/.test(data.trim())) {
-                return 'bss-num';
-            }
-            return null;
-        });
-        $.fn.dataTable.ext.type.order['bss-num-pre'] = function(data) {
-            const match = data.match(/^(-?\d+(\.\d+)?) \(([\d,]+)\)/);
-            if (match) {
-                const bssValue = parseFloat(match[1]);
-                const parensValue = parseInt(match[3].replace(/,/g, ""), 10);
-                return bssValue + (parensValue / 100000000);
-            }
-            return [0, 0];
-        };
         $(document).ready(function() {
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
@@ -523,6 +508,7 @@ def make_and_upload_html_table(df, title, basename):
                 "paging": false,
                 "info": false,
                 "orderMulti": false,
+                "stateSave": true,
                 "search": {
                     "regex": true,
                     "smart": true
@@ -535,6 +521,10 @@ def make_and_upload_html_table(df, title, basename):
                     {
                         "targets": '_all',
                         "searchable": true
+                    },
+                    {
+                        "targets": '_all',
+                        "orderSequence": ["asc", "desc"]
                     }
                 ]
             });

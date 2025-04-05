@@ -571,11 +571,69 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
 
     Modified from https://colab.research.google.com/drive/1KdwokPjirkTmpO_P1WByFNFiqxWQquwH#scrollTo=mSizG3Pzglte # noqa: B950
     """
+    unique_questions = pd.concat(
+        [
+            df[df["source"].isin(question_curation.DATA_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                    "direction",
+                    "resolution_date_a",
+                    "resolution_date_b",
+                ],
+                ignore_index=True,
+            ),
+            df[df["source"].isin(question_curation.MARKET_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                ],
+                ignore_index=True,
+            ),
+        ]
+    )
+    unique_questions["type"] = unique_questions["source"].apply(
+        lambda src: (
+            "data"
+            if src in question_curation.DATA_SOURCES
+            else ("market" if src in question_curation.MARKET_SOURCES else "unknown")
+        )
+    )
+    if (unique_questions["type"] == "unknown").any():
+        raise ValueError("Should either be market or data (1).")
+
+    question_type_lookup = {}
+    for forecast_due_date in unique_questions["forecast_due_date"].unique():
+        df_tmp = unique_questions[unique_questions["forecast_due_date"] == forecast_due_date]
+        n_dataset_questions = (df_tmp["type"] == "data").sum()
+        n_market_questions = (df_tmp["type"] == "market").sum()
+        question_type_lookup[(forecast_due_date, "market")] = 1.0 if n_market_questions else 0.0
+        if n_market_questions and n_dataset_questions:
+            question_type_lookup[(forecast_due_date, "data")] = (
+                n_market_questions / n_dataset_questions
+            )
+        else:
+            question_type_lookup[(forecast_due_date, "data")] = 1.0 if n_dataset_questions else 0.0
+
+    df["type"] = df["source"].apply(
+        lambda src: (
+            "data"
+            if src in question_curation.DATA_SOURCES
+            else ("market" if src in question_curation.MARKET_SOURCES else "unknown")
+        )
+    )
+    df["per_row_weight"] = df.set_index(["forecast_due_date", "type"]).index.map(
+        question_type_lookup
+    )
+
     ptbl_a_win = pd.pivot_table(
         df[df["winner"] == "model_a"],
         index="model_a",
         columns="model_b",
-        aggfunc="size",
+        values="per_row_weight",
+        aggfunc="sum",
         fill_value=0,
     )
 
@@ -587,7 +645,8 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
             df[df["winner"].isin(["tie", "tie (bothbad)"])],
             index="model_a",
             columns="model_b",
-            aggfunc="size",
+            values="per_row_weight",
+            aggfunc="sum",
             fill_value=0,
         )
 
@@ -597,7 +656,8 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         df[df["winner"] == "model_b"],
         index="model_a",
         columns="model_b",
-        aggfunc="size",
+        values="per_row_weight",
+        aggfunc="sum",
         fill_value=0,
     )
 

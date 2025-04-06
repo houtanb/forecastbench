@@ -24,15 +24,18 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from helpers import (  # noqa: E402
     constants,
     decorator,
-    env,
-    git,
-    keys,
+#    env,
+#    git,
+#    keys,
     question_curation,
     resolution,
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
-from utils import gcp  # noqa: E402
+#from utils import gcp  # noqa: E402
+from helpers import env as gcp
+from helpers import env as keys
+from helpers import env as git
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

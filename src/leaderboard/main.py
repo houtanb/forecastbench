@@ -12,6 +12,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
@@ -299,22 +300,33 @@ def make_and_upload_html_table(df, title, basename):
         df.loc[index, "Ranking"] = prev_rank
     df.drop(columns="score_diff", inplace=True)
 
-    def format_score(score_series, count_series):
-        def safe_format_score(x):
-            try:
-                return f"{float(x):.{LEADERBOARD_DECIMAL_PLACES}f}"
-            except (ValueError, TypeError):
-                return str(x)
-
-        formatted_scores = score_series.apply(safe_format_score)
-        formatted_counts = count_series.map(lambda x: f"{int(x):,}" if pd.notnull(x) else "")
-
-        # Ensure both series are strings before concatenation.
-        return formatted_scores.astype(str) + " (" + formatted_counts.astype(str) + ")"
-
     df["elo_overall"] = df["elo_overall"].round().astype(int)
     df["elo_data"] = df["elo_data"].round().astype(int)
     df["elo_market"] = df["elo_market"].round().astype(int)
+
+    for c in [
+        "n_imputed_market",
+        "n_imputed_market_resolved",
+        "n_imputed_market_unresolved",
+        "n_imputed_data",
+        "n_imputed_overall",
+    ]:
+        df[c] = df[c].round().astype(int).astype(str) + "%"
+
+    for c in ["n_data", "n_market", "n_market_unresolved", "n_market_resolved", "n_overall"]:
+        df[c] = df[c].astype(int)
+
+    def make_market_tuple(row):
+        return (
+            "R: "
+            + str((row["n_market_resolved"], row["n_imputed_market_resolved"]))
+            + "<br>U: "
+            + str((row["n_market_unresolved"], row["n_imputed_market_unresolved"]))
+        )
+
+    df["data_info"] = df.apply(lambda row: (row["n_data"], row["n_imputed_data"]), axis=1)
+    df["market_info"] = df.apply(make_market_tuple, axis=1)
+    df["overall_info"] = df.apply(lambda row: (row["n_overall"], row["n_imputed_overall"]), axis=1)
 
     df = df[
         [
@@ -323,8 +335,11 @@ def make_and_upload_html_table(df, title, basename):
             "model",
             "forecast_due_date",
             "elo_data",
+            "data_info",
             "elo_market",
+            "market_info",
             "elo_overall",
+            "overall_info",
         ]
     ]
     df = df.rename(
@@ -333,8 +348,11 @@ def make_and_upload_html_table(df, title, basename):
             "model": "Model",
             "forecast_due_date": "Forecast due date(s)",
             "elo_data": "Elo dataset",
+            "data_info": "Data info",
             "elo_market": "Elo market",
+            "market_info": "Market info",
             "elo_overall": "Elo overall",
+            "overall_info": "Overall info",
         }
     )
 
@@ -417,7 +435,7 @@ def make_and_upload_html_table(df, title, basename):
         render_links=True,
     )
 
-    ORDER_COL_IDX = 6
+    ORDER_COL_IDX = 8
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -568,6 +586,11 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
+def print_all(df):
+    with pd.option_context("display.max_rows", None, "display.max_columns", None):
+        print(df)
+
+
 def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
     """
     Compute Elo-like scores using the Bradley-Terry model, as in chatbot arena.
@@ -592,6 +615,7 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
                     "forecast_due_date",
                     "id",
                     "source",
+                    "direction",
                 ],
                 ignore_index=True,
             ),
@@ -608,10 +632,12 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         raise ValueError("Should either be market or data (1).")
 
     question_type_lookup = {}
+    question_n_lookup = {}
     for forecast_due_date in unique_questions["forecast_due_date"].unique():
         df_tmp = unique_questions[unique_questions["forecast_due_date"] == forecast_due_date]
         n_dataset_questions = (df_tmp["type"] == "data").sum()
         n_market_questions = (df_tmp["type"] == "market").sum()
+        question_n_lookup[(forecast_due_date, "market")] = (n_dataset_questions, n_market_questions)
         question_type_lookup[(forecast_due_date, "market")] = 1.0 if n_market_questions else 0.0
         if n_market_questions and n_dataset_questions:
             question_type_lookup[(forecast_due_date, "data")] = (
@@ -619,6 +645,8 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
             )
         else:
             question_type_lookup[(forecast_due_date, "data")] = 1.0 if n_dataset_questions else 0.0
+
+    pprint(question_n_lookup)
 
     df["type"] = df["source"].apply(
         lambda src: (
@@ -813,6 +841,40 @@ def compute_elos(leaderboard):
         lambda row: model_dates.get((row["organization"], row["model"]), []), axis=1
     )
 
+    for c in [
+        "n_data",
+        "n_market",
+        "n_market_unresolved",
+        "n_market_resolved",
+        "n_overall",
+        "n_imputed_market",
+        "n_imputed_market_resolved",
+        "n_imputed_market_unresolved",
+        "n_imputed_data",
+        "n_imputed_overall",
+    ]:
+        elos[c] = -1
+
+    for entry in leaderboard:
+        for c in [
+            "n_data",
+            "n_market",
+            "n_market_unresolved",
+            "n_market_resolved",
+            "n_overall",
+            "n_imputed_market",
+            "n_imputed_market_resolved",
+            "n_imputed_market_unresolved",
+            "n_imputed_data",
+            "n_imputed_overall",
+        ]:
+            org_mask = (elos["organization"] == entry["organization"]) & (
+                elos["model"] == entry["model"]
+            )
+            if (elos.loc[org_mask, c] == -1).all():
+                elos.loc[org_mask, c] = np.float64(entry[c])
+            else:
+                elos.loc[org_mask, c] += np.float64(entry[c])
     return elos
 
 
@@ -844,6 +906,29 @@ def worker(task):
         raise ValueError(msg)
 
 
+def get_df_info(df):
+    masks = get_masks(df)
+
+    return {
+        "n_data": len(df[masks["data"]]),
+        "n_market": len(df[masks["market"]]),
+        "n_market_resolved": len(df[masks["market_resolved"]]),
+        "n_market_unresolved": len(df[masks["market_unresolved"]]),
+        "n_overall": len(df),
+        "n_imputed_data": df[masks["data"]]["imputed"].sum() / len(df[masks["data"]]) * 100,
+        "n_imputed_market": df[masks["market"]]["imputed"].sum() / len(df[masks["market"]]) * 100,
+        "n_imputed_market_resolved": (
+            df[masks["market_resolved"]]["imputed"].sum() / len(df[masks["market_resolved"]]) * 100
+            if len(df[masks["market_resolved"]])
+            else 0
+        ),
+        "n_imputed_market_unresolved": df[masks["market_unresolved"]]["imputed"].sum()
+        / len(df[masks["market_unresolved"]])
+        * 100,
+        "n_imputed_overall": df["imputed"].sum() / len(df) * 100,
+    }
+
+
 @decorator.log_runtime
 def driver(_):
     """Create new leaderboard."""
@@ -856,6 +941,10 @@ def driver(_):
     ):
         with open("leaderboard.pkl", "rb") as file:
             leaderboard = pickle.load(file)
+
+        for entry in leaderboard:
+            entry |= get_df_info(entry["df"])
+
         return make_leaderboard(
             leaderboard=leaderboard,
             title="Human leaderboard",

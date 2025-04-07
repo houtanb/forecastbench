@@ -303,13 +303,15 @@ def make_and_upload_html_table(df, title, basename):
     df["elo_overall"] = df["elo_overall"].round().astype(int)
     df["elo_data"] = df["elo_data"].round().astype(int)
     df["elo_market"] = df["elo_market"].round().astype(int)
+    df["elo_market_resolved"] = df["elo_market_resolved"].round().astype(int)
+    df["elo_market_unresolved"] = df["elo_market_unresolved"].round().astype(int)
 
     for c in [
-        "n_imputed_market",
-        "n_imputed_market_resolved",
-        "n_imputed_market_unresolved",
-        "n_imputed_data",
-        "n_imputed_overall",
+        "pct_imputed_market",
+        "pct_imputed_market_resolved",
+        "pct_imputed_market_unresolved",
+        "pct_imputed_data",
+        "pct_imputed_overall",
     ]:
         df[c] = df[c].round().astype(int).astype(str) + "%"
 
@@ -319,14 +321,17 @@ def make_and_upload_html_table(df, title, basename):
     def make_market_tuple(row):
         return (
             "R: "
-            + str((row["n_market_resolved"], row["n_imputed_market_resolved"]))
+            + str((row["n_market_resolved"], row["pct_imputed_market_resolved"]))
             + "<br>U: "
-            + str((row["n_market_unresolved"], row["n_imputed_market_unresolved"]))
+            + str((row["n_market_unresolved"], row["pct_imputed_market_unresolved"]))
         )
 
-    df["data_info"] = df.apply(lambda row: (row["n_data"], row["n_imputed_data"]), axis=1)
-    df["market_info"] = df.apply(make_market_tuple, axis=1)
-    df["overall_info"] = df.apply(lambda row: (row["n_overall"], row["n_imputed_overall"]), axis=1)
+    df["data_info"] = df.apply(lambda row: (row["n_data"], row["pct_imputed_data"]), axis=1)
+    df["market_resolved_info"] = df.apply(lambda row: (row["n_market_resolved"], row["pct_imputed_market_resolved"]), axis=1)
+    df["market_unresolved_info"] = df.apply(lambda row: (row["n_market_unresolved"], row["pct_imputed_market_unresolved"]), axis=1)
+    df["overall_info"] = df.apply(
+        lambda row: (row["n_overall"], row["pct_imputed_overall"]), axis=1
+    )
 
     df = df[
         [
@@ -336,8 +341,11 @@ def make_and_upload_html_table(df, title, basename):
             "forecast_due_date",
             "elo_data",
             "data_info",
+            "elo_market_resolved",
+            "market_resolved_info",
+            "elo_market_unresolved",
+            "market_unresolved_info",
             "elo_market",
-            "market_info",
             "elo_overall",
             "overall_info",
         ]
@@ -347,11 +355,14 @@ def make_and_upload_html_table(df, title, basename):
             "organization": "Organization",
             "model": "Model",
             "forecast_due_date": "Forecast due date(s)",
-            "elo_data": "Elo dataset",
+            "elo_data": "Score dataset",
             "data_info": "Data info",
-            "elo_market": "Elo market",
-            "market_info": "Market info",
-            "elo_overall": "Elo overall",
+            "elo_market": "Score market",
+            "elo_market_resolved": "Score market res.",
+            "elo_market_unresolved": "Sscore market unres.",
+            "market_resolved_info": "resolv.  info",
+            "market_unresolved_info": "unres. info",
+            "elo_overall": "Score overall",
             "overall_info": "Overall info",
         }
     )
@@ -435,7 +446,7 @@ def make_and_upload_html_table(df, title, basename):
         render_links=True,
     )
 
-    ORDER_COL_IDX = 8
+    ORDER_COL_IDX = 11
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -659,11 +670,31 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         question_type_lookup
     )
 
+    df["score_diff"] = abs(
+        df["score_a"] - df["score_b"]
+    )  # negative means a is better, positive means b is better \in [-1,1]
+
+    # Sigmoid
+    # df["sigmoid"] = 1 + df["score_diff"]/(1-abs(df["score_diff"]))
+    from scipy.special import erf
+
+    scale = 1 / erf(np.sqrt(np.pi) / 2)
+    df["sigmoid"] = 1 + scale * erf(np.sqrt(np.pi) / 2 * df["score_diff"])
+    df["scale"] = df["per_row_weight"] * df["sigmoid"]
+    print(
+        df[df["winner"] != "tie"][
+            ["winner", "score_a", "score_b", "sigmoid", "per_row_weight", "scale"]
+        ]
+    )
+    print(df["sigmoid"].min(), df["sigmoid"].max())
+    # print(df[df["sigmoid"]>1.789][["winner","score_a","score_b","sigmoid","per_row_weight"]])
+    # sys.exit()
+
     ptbl_a_win = pd.pivot_table(
         df[df["winner"] == "model_a"],
         index="model_a",
         columns="model_b",
-        values="per_row_weight",
+        values="scale",
         aggfunc="sum",
         fill_value=0,
     )
@@ -687,7 +718,7 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         df[df["winner"] == "model_b"],
         index="model_a",
         columns="model_b",
-        values="per_row_weight",
+        values="scale",
         aggfunc="sum",
         fill_value=0,
     )
@@ -766,6 +797,8 @@ def combine_rounds(leaderboard, mask_name=None):
                 )
                 df_model_b = mask_model(value_b["df"].copy())
                 df_model_b["model"] = get_model_name(value_b)
+                if df_model_a.empty or df_model_b.empty:
+                    continue
                 df_tmp = pd.merge(
                     df_model_a,
                     df_model_b,
@@ -815,7 +848,7 @@ def compute_elos(leaderboard):
         return elos
 
     elo_scores = {}
-    for to_run in ["data", "market", "overall"]:
+    for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
         logger.info(f"Running {to_run}.")
         mask = None if to_run == "overall" else to_run
         elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}.pkl", mask)
@@ -825,10 +858,20 @@ def compute_elos(leaderboard):
 
     data_elos = transform_elos(elo_scores["data"], elo_col_name="elo_data")
     market_elos = transform_elos(elo_scores["market"], elo_col_name="elo_market")
+    market_resolved_elos = transform_elos(
+        elo_scores["market_resolved"], elo_col_name="elo_market_resolved"
+    )
+    market_unresolved_elos = transform_elos(
+        elo_scores["market_unresolved"], elo_col_name="elo_market_unresolved"
+    )
     elos = transform_elos(elo_scores["overall"], elo_col_name="elo_overall")
 
     elos = pd.merge(elos, data_elos, on=["organization", "model"]).reset_index(drop=True)
     elos = pd.merge(elos, market_elos, on=["organization", "model"]).reset_index(drop=True)
+    elos = pd.merge(elos, market_resolved_elos, on=["organization", "model"]).reset_index(drop=True)
+    elos = pd.merge(elos, market_unresolved_elos, on=["organization", "model"]).reset_index(
+        drop=True
+    )
 
     model_dates = defaultdict(set)
     for entry in leaderboard:
@@ -847,11 +890,6 @@ def compute_elos(leaderboard):
         "n_market_unresolved",
         "n_market_resolved",
         "n_overall",
-        "n_imputed_market",
-        "n_imputed_market_resolved",
-        "n_imputed_market_unresolved",
-        "n_imputed_data",
-        "n_imputed_overall",
     ]:
         elos[c] = -1
 
@@ -862,11 +900,6 @@ def compute_elos(leaderboard):
             "n_market_unresolved",
             "n_market_resolved",
             "n_overall",
-            "n_imputed_market",
-            "n_imputed_market_resolved",
-            "n_imputed_market_unresolved",
-            "n_imputed_data",
-            "n_imputed_overall",
         ]:
             org_mask = (elos["organization"] == entry["organization"]) & (
                 elos["model"] == entry["model"]
@@ -875,6 +908,34 @@ def compute_elos(leaderboard):
                 elos.loc[org_mask, c] = np.float64(entry[c])
             else:
                 elos.loc[org_mask, c] += np.float64(entry[c])
+
+    cols = [
+        "pct_imputed_market",
+        "pct_imputed_market_resolved",
+        "pct_imputed_market_unresolved",
+        "pct_imputed_data",
+        "pct_imputed_overall",
+    ]
+    for c in cols:
+        elos[c] = [[] for _ in range(len(elos))]
+
+    for entry in leaderboard:
+        org_mask = (elos["organization"] == entry["organization"]) & (
+            elos["model"] == entry["model"]
+        )
+        for c in cols:
+            #           elos.loc[org_mask, c] = elos.loc[org_mask, c].apply(
+            #               lambda lst: lst + [np.float64(entry[c])]
+            #           )
+            elos.loc[org_mask, c] = elos.loc[org_mask, c].apply(
+                lambda lst, val=np.float64(entry[c]): lst + [val]
+            )
+
+    for c in cols:
+        elos[c] = elos[c].apply(
+            lambda lst: np.mean([x for x in lst if x > 0]) if any(x > 0 for x in lst) else 0
+        )
+
     return elos
 
 
@@ -906,26 +967,25 @@ def worker(task):
         raise ValueError(msg)
 
 
-def get_df_info(df):
+def get_df_info(df, model):
     masks = get_masks(df)
-
     return {
         "n_data": len(df[masks["data"]]),
         "n_market": len(df[masks["market"]]),
         "n_market_resolved": len(df[masks["market_resolved"]]),
         "n_market_unresolved": len(df[masks["market_unresolved"]]),
         "n_overall": len(df),
-        "n_imputed_data": df[masks["data"]]["imputed"].sum() / len(df[masks["data"]]) * 100,
-        "n_imputed_market": df[masks["market"]]["imputed"].sum() / len(df[masks["market"]]) * 100,
-        "n_imputed_market_resolved": (
+        "pct_imputed_data": df[masks["data"]]["imputed"].sum() / len(df[masks["data"]]) * 100,
+        "pct_imputed_market": df[masks["market"]]["imputed"].sum() / len(df[masks["market"]]) * 100,
+        "pct_imputed_market_resolved": (
             df[masks["market_resolved"]]["imputed"].sum() / len(df[masks["market_resolved"]]) * 100
             if len(df[masks["market_resolved"]])
             else 0
         ),
-        "n_imputed_market_unresolved": df[masks["market_unresolved"]]["imputed"].sum()
+        "pct_imputed_market_unresolved": df[masks["market_unresolved"]]["imputed"].sum()
         / len(df[masks["market_unresolved"]])
         * 100,
-        "n_imputed_overall": df["imputed"].sum() / len(df) * 100,
+        "pct_imputed_overall": df["imputed"].sum() / len(df) * 100,
     }
 
 
@@ -943,7 +1003,7 @@ def driver(_):
             leaderboard = pickle.load(file)
 
         for entry in leaderboard:
-            entry |= get_df_info(entry["df"])
+            entry |= get_df_info(entry["df"], entry["model"])
 
         return make_leaderboard(
             leaderboard=leaderboard,

@@ -25,18 +25,15 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from helpers import (  # noqa: E402
     constants,
     decorator,
-#    env,
-#    git,
-#    keys,
+    env,
+    git,
+    keys,
     question_curation,
     resolution,
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
-#from utils import gcp  # noqa: E402
-from helpers import env as gcp
-from helpers import env as keys
-from helpers import env as git
+from utils import gcp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -291,6 +288,12 @@ def make_and_upload_html_table(df, title, basename):
     numeric_cols = df.select_dtypes(include="number").columns
     df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
 
+    df["elo_overall"] = df["elo_overall"].round().astype(int)
+    df["elo_data"] = df["elo_data"].round().astype(int)
+    df["elo_market"] = df["elo_market"].round().astype(int)
+    df["elo_market_resolved"] = df["elo_market_resolved"].round().astype(int)
+    df["elo_market_unresolved"] = df["elo_market_unresolved"].round().astype(int)
+
     # Insert ranking
     df.insert(loc=0, column="Ranking", value="")
     df["score_diff"] = df["elo_overall"] - df["elo_overall"].shift(1)
@@ -299,12 +302,6 @@ def make_and_upload_html_table(df, title, basename):
             prev_rank = index + 1
         df.loc[index, "Ranking"] = prev_rank
     df.drop(columns="score_diff", inplace=True)
-
-    df["elo_overall"] = df["elo_overall"].round().astype(int)
-    df["elo_data"] = df["elo_data"].round().astype(int)
-    df["elo_market"] = df["elo_market"].round().astype(int)
-    df["elo_market_resolved"] = df["elo_market_resolved"].round().astype(int)
-    df["elo_market_unresolved"] = df["elo_market_unresolved"].round().astype(int)
 
     for c in [
         "pct_imputed_market",
@@ -327,8 +324,12 @@ def make_and_upload_html_table(df, title, basename):
         )
 
     df["data_info"] = df.apply(lambda row: (row["n_data"], row["pct_imputed_data"]), axis=1)
-    df["market_resolved_info"] = df.apply(lambda row: (row["n_market_resolved"], row["pct_imputed_market_resolved"]), axis=1)
-    df["market_unresolved_info"] = df.apply(lambda row: (row["n_market_unresolved"], row["pct_imputed_market_unresolved"]), axis=1)
+    df["market_resolved_info"] = df.apply(
+        lambda row: (row["n_market_resolved"], row["pct_imputed_market_resolved"]), axis=1
+    )
+    df["market_unresolved_info"] = df.apply(
+        lambda row: (row["n_market_unresolved"], row["pct_imputed_market_unresolved"]), axis=1
+    )
     df["overall_info"] = df.apply(
         lambda row: (row["n_overall"], row["pct_imputed_overall"]), axis=1
     )
@@ -602,6 +603,15 @@ def print_all(df):
         print(df)
 
 
+def get_bootstrap_result(battles, func_compute_elo):
+    num_round = 100
+    rows = []
+    for _ in tqdm(range(num_round), desc="bootstrap"):
+        rows.append(func_compute_elo(battles.sample(frac=1.0, replace=True)))
+    df = pd.DataFrame(rows)
+    return df[df.median().sort_values(ascending=False).index]
+
+
 def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
     """
     Compute Elo-like scores using the Bradley-Terry model, as in chatbot arena.
@@ -670,25 +680,9 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         question_type_lookup
     )
 
-    df["score_diff"] = abs(
-        df["score_a"] - df["score_b"]
-    )  # negative means a is better, positive means b is better \in [-1,1]
-
-    # Sigmoid
-    # df["sigmoid"] = 1 + df["score_diff"]/(1-abs(df["score_diff"]))
-    from scipy.special import erf
-
-    scale = 1 / erf(np.sqrt(np.pi) / 2)
-    df["sigmoid"] = 1 + scale * erf(np.sqrt(np.pi) / 2 * df["score_diff"])
-    df["scale"] = df["per_row_weight"] * df["sigmoid"]
-    print(
-        df[df["winner"] != "tie"][
-            ["winner", "score_a", "score_b", "sigmoid", "per_row_weight", "scale"]
-        ]
-    )
-    print(df["sigmoid"].min(), df["sigmoid"].max())
-    # print(df[df["sigmoid"]>1.789][["winner","score_a","score_b","sigmoid","per_row_weight"]])
-    # sys.exit()
+    df["score_diff"] = abs(df["score_a"] - df["score_b"])
+    df["scale_score_diff"] = 1 + df["score_diff"] ** 2
+    df["scale"] = df["per_row_weight"] * df["scale_score_diff"]
 
     ptbl_a_win = pd.pivot_table(
         df[df["winner"] == "model_a"],
@@ -820,7 +814,7 @@ def combine_rounds(leaderboard, mask_name=None):
     return pd.concat(combined_data, axis=0, ignore_index=True)
 
 
-def compute_elos(leaderboard):
+def compute_elos(leaderboard, leaderboard_suffix):
     """Compute the Elo scores."""
 
     def compute_chatbot_elos(filename, mask=None):
@@ -832,6 +826,9 @@ def compute_elos(leaderboard):
             with open(filename, "wb") as file:
                 pickle.dump(df, file)
         return compute_mle_elo(df)
+        # bootstrap_elo_lu = get_bootstrap_result(df_orig, compute_mle_elo)
+        # print(bootstrap_elo_lu)
+        # sys.exit()
 
     def transform_elos(elos, elo_col_name):
         elos = elos.reset_index(name=elo_col_name)
@@ -851,7 +848,7 @@ def compute_elos(leaderboard):
     for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
         logger.info(f"Running {to_run}.")
         mask = None if to_run == "overall" else to_run
-        elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}.pkl", mask)
+        elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}_{leaderboard_suffix}.pkl", mask)
 
     with open("elo_scores.pkl", "wb") as file:
         pickle.dump(elo_scores, file)
@@ -884,65 +881,69 @@ def compute_elos(leaderboard):
         lambda row: model_dates.get((row["organization"], row["model"]), []), axis=1
     )
 
-    for c in [
+    print(elos)
+    pprint(elos.columns)
+
+    cols = [
         "n_data",
         "n_market",
         "n_market_unresolved",
         "n_market_resolved",
         "n_overall",
-    ]:
+    ]
+    for c in cols:
         elos[c] = -1
 
     for entry in leaderboard:
-        for c in [
-            "n_data",
-            "n_market",
-            "n_market_unresolved",
-            "n_market_resolved",
-            "n_overall",
-        ]:
+        for c in cols:
             org_mask = (elos["organization"] == entry["organization"]) & (
                 elos["model"] == entry["model"]
             )
             if (elos.loc[org_mask, c] == -1).all():
-                elos.loc[org_mask, c] = np.float64(entry[c])
+                if c not in entry:
+                    elos.loc[org_mask, c] = 0
+                else:
+                    elos.loc[org_mask, c] = np.float64(entry[c])
             else:
                 elos.loc[org_mask, c] += np.float64(entry[c])
 
+    # print([d for d in leaderboard if d["model"]=="Naive Forecaster"])
+
     cols = [
-        "pct_imputed_market",
-        "pct_imputed_market_resolved",
-        "pct_imputed_market_unresolved",
-        "pct_imputed_data",
-        "pct_imputed_overall",
+        ("pct_imputed_market", "n_market"),
+        ("pct_imputed_market_resolved", "n_market_resolved"),
+        ("pct_imputed_market_unresolved", "n_market_unresolved"),
+        ("pct_imputed_data", "n_data"),
+        ("pct_imputed_overall", "n_overall"),
     ]
-    for c in cols:
-        elos[c] = [[] for _ in range(len(elos))]
+    for c, _ in cols:
+        elos[c] = -1
 
     for entry in leaderboard:
         org_mask = (elos["organization"] == entry["organization"]) & (
             elos["model"] == entry["model"]
         )
-        for c in cols:
-            #           elos.loc[org_mask, c] = elos.loc[org_mask, c].apply(
-            #               lambda lst: lst + [np.float64(entry[c])]
-            #           )
-            elos.loc[org_mask, c] = elos.loc[org_mask, c].apply(
-                lambda lst, val=np.float64(entry[c]): lst + [val]
-            )
+        for c, n in cols:
+            if (elos.loc[org_mask, c] == -1).all():
+                if c not in entry:
+                    elos.loc[org_mask, c] = 0
+                else:
+                    elos.loc[org_mask, c] = round(entry[c] / 100 * entry[n])
+            else:
+                elos.loc[org_mask, c] += round(entry[c] / 100 * entry[n])
 
-    for c in cols:
-        elos[c] = elos[c].apply(
-            lambda lst: np.mean([x for x in lst if x > 0]) if any(x > 0 for x in lst) else 0
-        )
+    for index, _ in elos.iterrows():
+        for c, n in cols:
+            elos[c] = elos[c].astype(float)
+            elos.loc[index, c] = elos.loc[index, c] / elos.loc[index, n] * 100
 
     return elos
 
 
-def make_leaderboard(leaderboard, title, basename):
+def make_leaderboard(leaderboard, title, basename, leaderboard_suffix):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = compute_elos(leaderboard)
+    df = compute_elos(leaderboard, leaderboard_suffix)
 
     files = make_and_upload_html_table(
         df=df,
@@ -960,6 +961,7 @@ def worker(task):
             leaderboard=task["leaderboard"],
             title=task["title"],
             basename=task["basename"],
+            leaderboard_suffix="human" if "Human" in task["title"] else "llm",
         )
     except Exception as e:
         msg = f"Error processing task {task['title']}: {e}"
@@ -994,29 +996,46 @@ def driver(_):
     """Create new leaderboard."""
     # Shortcut while testing
     if (
-        os.path.exists("leaderboard.pkl")
-        and os.path.exists("df_data.pkl")
-        and os.path.exists("df_market.pkl")
-        and os.path.exists("df_overall.pkl")
+        os.path.exists("leaderboard_human.pkl")
+        and os.path.exists("df_data_human.pkl")
+        and os.path.exists("df_market_human.pkl")
+        and os.path.exists("df_overall_human.pkl")
     ):
-        with open("leaderboard.pkl", "rb") as file:
-            leaderboard = pickle.load(file)
 
-        for entry in leaderboard:
-            entry |= get_df_info(entry["df"], entry["model"])
+        def read_leaderboard(f):
+            with open(f, "rb") as file:
+                leaderboard = pickle.load(file)
+            for entry in leaderboard:
+                entry |= get_df_info(entry["df"], entry["model"])
+            return leaderboard
 
-        return make_leaderboard(
-            leaderboard=leaderboard,
-            title="Human leaderboard",
+        # leaderboard=read_leaderboard("leaderboard_human.pkl")
+        # for entry in leaderboard:
+        #     print(entry["model"])
+        #     if entry["model"]=="Claude-3-7-Sonnet-20250219 (zero shot with freeze values)":
+        #         pprint(entry)
+        # sys.exit()
+        title = "Leaderboard: overall"
+        make_leaderboard(
+            leaderboard=read_leaderboard("leaderboard_human.pkl"),
+            title=f"Human {title}",
             basename="human_leaderboard_overall",
+            leaderboard_suffix="human",
         )
+        make_leaderboard(
+            leaderboard=read_leaderboard("leaderboard_llm.pkl"),
+            title=title,
+            basename="leaderboard_overall",
+            leaderboard_suffix="llm",
+        )
+        return
 
     cache = {}
     llm_leaderboard = {}
     llm_and_human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    files = [file for file in files if file.endswith(".json")]
+    files = [file for file in files if file.endswith(".json") and not file.startswith("2024-12-08")]
     files1 = [
         # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
         "2024-07-21/2024-07-21.ForecastBench.always-0.json",
@@ -1142,11 +1161,11 @@ def driver(_):
 
     title = "Leaderboard: overall"
     tasks = [
-        # {
-        #     "leaderboard": llm_leaderboard["overall"],
-        #     "title": title,
-        #     "basename": "leaderboard_overall",
-        # },
+        {
+            "leaderboard": llm_leaderboard["overall"],
+            "title": title,
+            "basename": "leaderboard_overall",
+        },
         # {
         #     "leaderboard": llm_and_human_leaderboard["overall"],
         #     "title": f"Human {title}",
@@ -1184,7 +1203,10 @@ def driver(_):
         # },
     ]
 
-    with open("leaderboard.pkl", "wb") as file:
+    with open("leaderboard_llm.pkl", "wb") as file:
+        pickle.dump(llm_leaderboard["overall"], file)
+
+    with open("leaderboard_human.pkl", "wb") as file:
         pickle.dump(llm_and_human_leaderboard["overall"], file)
 
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")

@@ -612,7 +612,78 @@ def get_bootstrap_result(battles, func_compute_elo):
     return df[df.median().sort_values(ascending=False).index]
 
 
-def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
+def compute_mle_elo_orig(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
+    """
+    Pulled directly from https://colab.research.google.com/drive/1KdwokPjirkTmpO_P1WByFNFiqxWQquwH#scrollTo=mSizG3Pzglte # noqa: B950
+    """
+    from sklearn.linear_model import LogisticRegression
+
+    ptbl_a_win = pd.pivot_table(
+        df[df["winner"] == "model_a"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
+    )
+    # if no tie, create a zero matrix
+    if sum(df["winner"].isin(["tie", "tie (bothbad)"])) == 0:
+        ptbl_tie = pd.DataFrame(0, index=ptbl_a_win.index, columns=ptbl_a_win.columns)
+    else:
+        ptbl_tie = pd.pivot_table(
+            df[df["winner"].isin(["tie", "tie (bothbad)"])],
+            index="model_a",
+            columns="model_b",
+            aggfunc="size",
+            fill_value=0,
+        )
+        ptbl_tie = ptbl_tie + ptbl_tie.T
+
+    ptbl_b_win = pd.pivot_table(
+        df[df["winner"] == "model_b"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
+    )
+    ptbl_win = ptbl_a_win * 2 + ptbl_b_win.T * 2 + ptbl_tie
+
+    models = pd.Series(np.arange(len(ptbl_win.index)), index=ptbl_win.index)
+
+    p = len(models)
+    X = np.zeros([p * (p - 1) * 2, p])
+    Y = np.zeros(p * (p - 1) * 2)
+
+    cur_row = 0
+    sample_weights = []
+    for m_a in ptbl_win.index:
+        for m_b in ptbl_win.columns:
+            if m_a == m_b:
+                continue
+            # if nan skip
+            if math.isnan(ptbl_win.loc[m_a, m_b]) or math.isnan(ptbl_win.loc[m_b, m_a]):
+                continue
+            X[cur_row, models[m_a]] = +math.log(BASE)
+            X[cur_row, models[m_b]] = -math.log(BASE)
+            Y[cur_row] = 1.0
+            sample_weights.append(ptbl_win.loc[m_a, m_b])
+
+            X[cur_row + 1, models[m_a]] = math.log(BASE)
+            X[cur_row + 1, models[m_b]] = -math.log(BASE)
+            Y[cur_row + 1] = 0.0
+            sample_weights.append(ptbl_win.loc[m_b, m_a])
+            cur_row += 2
+    X = X[:cur_row]
+    Y = Y[:cur_row]
+
+    lr = LogisticRegression(fit_intercept=False, penalty=None, tol=1e-6)
+    lr.fit(X, Y, sample_weight=sample_weights)
+    elo_scores = SCALE * lr.coef_[0] + INIT_RATING
+    if "mixtral-8x7b-instruct-v0.1" in models.index:
+        elo_scores += 1114 - elo_scores[models["mixtral-8x7b-instruct-v0.1"]]
+    return pd.Series(elo_scores, index=models.index).sort_values(ascending=False)
+
+
+def compute_mle_elo_equal_weight(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
     """
     Compute Elo-like scores using the Bradley-Terry model, as in chatbot arena.
 
@@ -680,9 +751,153 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
         question_type_lookup
     )
 
+    ptbl_a_win = pd.pivot_table(
+        df[df["winner"] == "model_a"],
+        index="model_a",
+        columns="model_b",
+        values="per_row_weight",
+        aggfunc="sum",
+        fill_value=0,
+    )
+
+    # if no tie, create a zero matrix
+    if sum(df["winner"].isin(["tie", "tie (bothbad)"])) == 0:
+        ptbl_tie = pd.DataFrame(0, index=ptbl_a_win.index, columns=ptbl_a_win.columns)
+    else:
+        ptbl_tie = pd.pivot_table(
+            df[df["winner"].isin(["tie", "tie (bothbad)"])],
+            index="model_a",
+            columns="model_b",
+            values="per_row_weight",
+            aggfunc="sum",
+            fill_value=0,
+        )
+
+        ptbl_tie = ptbl_tie + ptbl_tie.T
+
+    ptbl_b_win = pd.pivot_table(
+        df[df["winner"] == "model_b"],
+        index="model_a",
+        columns="model_b",
+        values="per_row_weight",
+        aggfunc="sum",
+        fill_value=0,
+    )
+
+    ptbl_win = ptbl_a_win * 2 + ptbl_b_win.T * 2 + ptbl_tie
+
+    models = pd.Series(np.arange(len(ptbl_win.index)), index=ptbl_win.index)
+
+    p = len(models)
+    X = np.zeros([p * (p - 1) * 2, p])
+    Y = np.zeros(p * (p - 1) * 2)
+
+    cur_row = 0
+    sample_weights = []
+    for m_a in ptbl_win.index:
+        for m_b in ptbl_win.columns:
+            if m_a == m_b:
+                continue
+
+            if math.isnan(ptbl_win.loc[m_a, m_b]) or math.isnan(ptbl_win.loc[m_b, m_a]):
+                continue
+
+            X[cur_row, models[m_a]] = +math.log(BASE)
+            X[cur_row, models[m_b]] = -math.log(BASE)
+            Y[cur_row] = 1.0
+            sample_weights.append(ptbl_win.loc[m_a, m_b])
+
+            X[cur_row + 1, models[m_a]] = math.log(BASE)
+            X[cur_row + 1, models[m_b]] = -math.log(BASE)
+            Y[cur_row + 1] = 0.0
+            sample_weights.append(ptbl_win.loc[m_b, m_a])
+            cur_row += 2
+
+    X = X[:cur_row]
+    Y = Y[:cur_row]
+
+    lr = LogisticRegression(fit_intercept=False, penalty=None, tol=1e-6)
+    lr.fit(X, Y, sample_weight=sample_weights)
+    elo_scores = SCALE * lr.coef_[0] + INIT_RATING
+    if "mixtral-8x7b-instruct-v0.1" in models.index:
+        elo_scores += 1114 - elo_scores[models["mixtral-8x7b-instruct-v0.1"]]
+    return pd.Series(elo_scores, index=models.index).sort_values(ascending=False)
+
+
+def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
+    """
+    Compute Elo-like scores using the Bradley-Terry model, as in chatbot arena.
+
+    Modified from https://colab.research.google.com/drive/1KdwokPjirkTmpO_P1WByFNFiqxWQquwH#scrollTo=mSizG3Pzglte # noqa: B950
+    """
+    unique_questions = pd.concat(
+        [
+            df[df["source"].isin(question_curation.DATA_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                    "direction",
+                    "resolution_date_a",
+                    "resolution_date_b",
+                ],
+                ignore_index=True,
+            ),
+            df[df["source"].isin(question_curation.MARKET_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                    "direction",
+                ],
+                ignore_index=True,
+            ),
+        ]
+    )
+    unique_questions["type"] = unique_questions["source"].apply(
+        lambda src: (
+            "data"
+            if src in question_curation.DATA_SOURCES
+            else ("market" if src in question_curation.MARKET_SOURCES else "unknown")
+        )
+    )
+    if (unique_questions["type"] == "unknown").any():
+        raise ValueError("Should either be market or data (1).")
+
+    question_type_lookup = {}
+    question_n_lookup = {}
+    for forecast_due_date in unique_questions["forecast_due_date"].unique():
+        df_tmp = unique_questions[unique_questions["forecast_due_date"] == forecast_due_date]
+        n_dataset_questions = (df_tmp["type"] == "data").sum()
+        n_market_questions = (df_tmp["type"] == "market").sum()
+        question_n_lookup[(forecast_due_date, "market")] = (n_dataset_questions, n_market_questions)
+        question_type_lookup[(forecast_due_date, "market")] = 0.5 if n_market_questions else 0.0
+        if n_market_questions and n_dataset_questions:
+            question_type_lookup[(forecast_due_date, "data")] = 0.5 * (
+                n_market_questions / n_dataset_questions
+            )
+        else:
+            question_type_lookup[(forecast_due_date, "data")] = 0.5 if n_dataset_questions else 0.0
+
+    df["type"] = df["source"].apply(
+        lambda src: (
+            "data"
+            if src in question_curation.DATA_SOURCES
+            else ("market" if src in question_curation.MARKET_SOURCES else "unknown")
+        )
+    )
+    df["per_row_weight"] = df.set_index(["forecast_due_date", "type"]).index.map(
+        question_type_lookup
+    )
+
     df["score_diff"] = abs(df["score_a"] - df["score_b"])
     df["scale_score_diff"] = 1 + df["score_diff"] ** 2
     df["scale"] = df["per_row_weight"] * df["scale_score_diff"]
+
+    # for forecast_due_date in unique_questions["forecast_due_date"].unique():
+    #     forecast_due_date_mask = df["forecast_due_date"] == forecast_due_date
+    #     min_val, max_val = df.loc[forecast_due_date_mask,"scale"].min(), df.loc[forecast_due_date_mask,"scale"].max() # noqa: B950
+    #     print("scale min/max: ", forecast_due_date, min_val, df.loc[forecast_due_date_mask,"scale"].mean(), max_val) # noqa: B950
 
     ptbl_a_win = pd.pivot_table(
         df[df["winner"] == "model_a"],
@@ -825,10 +1040,9 @@ def compute_elos(leaderboard, leaderboard_suffix):
             df = combine_rounds(leaderboard, mask)
             with open(filename, "wb") as file:
                 pickle.dump(df, file)
+        # return compute_mle_elo_orig(df)
+        # return compute_mle_elo_equal_weight(df)
         return compute_mle_elo(df)
-        # bootstrap_elo_lu = get_bootstrap_result(df_orig, compute_mle_elo)
-        # print(bootstrap_elo_lu)
-        # sys.exit()
 
     def transform_elos(elos, elo_col_name):
         elos = elos.reset_index(name=elo_col_name)
@@ -846,7 +1060,7 @@ def compute_elos(leaderboard, leaderboard_suffix):
 
     elo_scores = {}
     for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
-        logger.info(f"Running {to_run}.")
+        logger.info(f"\n\nRunning {to_run}.")
         mask = None if to_run == "overall" else to_run
         elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}_{leaderboard_suffix}.pkl", mask)
 
@@ -1036,35 +1250,35 @@ def driver(_):
     # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json") and not file.startswith("2024-12-08")]
-    files1 = [
-        # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
-        "2024-07-21/2024-07-21.ForecastBench.always-0.json",
-        "2024-07-21/2024-07-21.ForecastBench.always-1.json",
-        "2024-07-21/2024-07-21.ForecastBench.human_public.json",
-        "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-        # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
-        # "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-        # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
-        "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
-        "2024-12-08/2024-12-08.ForecastBench.always-0.json",
-        "2024-12-08/2024-12-08.ForecastBench.always-1.json",
-        # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
-        # "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
-        # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
-        # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
-        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
-        "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
-        "2024-12-08/2024-12-08.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-        # "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
-        "2025-03-02/2025-03-02.ForecastBench.always-0.json",
-        "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
-    ]
+    # files1 = [
+    #     # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+    #     # "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+    #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
+    #     "2024-12-08/2024-12-08.ForecastBench.always-1.json",
+    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
+    #     # "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
+    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
+    #     # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
+    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
+    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
+    #     "2024-12-08/2024-12-08.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
+    #     # "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+    #     "2025-03-02/2025-03-02.ForecastBench.always-0.json",
+    #     "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+    # ]
 
     with ThreadPoolExecutor() as executor:
         dfs = list(

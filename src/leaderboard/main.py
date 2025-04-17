@@ -52,18 +52,15 @@ LEADERBOARD_DECIMAL_PLACES = 3
 
 def download_and_read_processed_forecast_file(filename):
     """Download forecast file."""
-    with tempfile.NamedTemporaryFile(dir="/tmp/", delete=False) as tmp:
-        local_filename = tmp.name
+    with tempfile.NamedTemporaryFile(dir="/tmp", delete=True) as tmp:
+        gcp.storage.download(
+            bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
+            filename=filename,
+            local_filename=tmp.name,
+        )
+        with open(tmp.name, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    gcp.storage.download(
-        bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
-        filename=filename,
-        local_filename=local_filename,
-    )
-    with open(local_filename, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    os.remove(local_filename)
     return {filename: data}
 
 
@@ -114,16 +111,58 @@ def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, questi
     """Add scores to the leaderboard."""
     leaderboard.setdefault("overall", [])
     leaderboard["overall"].append(
-        org_and_model | {"forecast_due_date": forecast_due_date, "df": df.copy()}
+        org_and_model | {"forecast_due_date": forecast_due_date, "df": df.copy()} | get_df_info(df)
     )
 
 
-def add_to_llm_leaderboard(*args, **kwargs):
+def add_to_llm_leaderboard_include_combos(*args, **kwargs):
     """Wrap `add_to_leaderboard` for easy reading of driver."""
     add_to_leaderboard(*args, **kwargs)
 
 
-def add_to_llm_and_human_leaderboard(
+def has_too_many_imputed(df, org_and_model) -> bool:
+    """Determine whether or not to include this model.
+
+    * Don't include models with more than D percent imputed data questions and M percent imputed
+      market questions.
+    * Always include ForecastBench models
+    """
+    MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
+    masks = get_masks(df)
+    df_data = df[masks["data"]]
+    df_market = df[masks["market"]]
+
+    if org_and_model["organization"] != constants.BENCHMARK_NAME and (
+        df_data["imputed"].mean() > MIN_DATA_MISSING_PCT
+        or df_market["imputed"].mean() > MIN_MARKET_MISSING_PCT
+    ):
+        logger.info(f"DROPPING {org_and_model}")
+        logger.info(f" * % imputed data: {round(df_data['imputed'].mean() * 100, 2)}")
+        logger.info(f" * % imputed market: {round(df_market['imputed'].mean() * 100, 2)}")
+        return True
+    return False
+
+
+def add_to_llm_leaderboard(
+    leaderboard, org_and_model, df, forecast_due_date, question_set_filename
+):
+    """Create the LLM leaderbeard.
+
+    * Remove combination questions before including in the LLM leaderboard
+    """
+    df_no_combos = df[df["direction"] == ()].reset_index(drop=True)
+
+    if not has_too_many_imputed(df_no_combos, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_no_combos,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
+
+
+def add_to_human_leaderboard(
     leaderboard, org_and_model, df, forecast_due_date, cache, question_set_filename
 ):
     """Parse the forecasts to include only those questions that were in the human question set."""
@@ -134,16 +173,18 @@ def add_to_llm_and_human_leaderboard(
         df_human_question_set[["id", "source"]],
         on=["id", "source"],
     ).reset_index(drop=True)
-    add_to_leaderboard(
-        leaderboard=leaderboard,
-        org_and_model=org_and_model,
-        df=df_only_human_question_set,
-        forecast_due_date=forecast_due_date,
-        question_set_filename=question_set_filename,
-    )
+
+    if not has_too_many_imputed(df_only_human_question_set, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_only_human_question_set,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
 
 
-def add_to_llm_and_human_combo_leaderboards(
+def add_to_human_combo_leaderboards(
     leaderboard_combo,
     org_and_model,
     df,
@@ -599,17 +640,9 @@ def make_and_upload_html_table(df, title, basename):
 
 
 def print_all(df):
+    """Print all rows and columns of dataframe."""
     with pd.option_context("display.max_rows", None, "display.max_columns", None):
         print(df)
-
-
-def get_bootstrap_result(battles, func_compute_elo):
-    num_round = 100
-    rows = []
-    for _ in tqdm(range(num_round), desc="bootstrap"):
-        rows.append(func_compute_elo(battles.sample(frac=1.0, replace=True)))
-    df = pd.DataFrame(rows)
-    return df[df.median().sort_values(ascending=False).index]
 
 
 def compute_mle_elo_orig(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
@@ -894,11 +927,6 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
     df["scale_score_diff"] = 1 + df["score_diff"] ** 2
     df["scale"] = df["per_row_weight"] * df["scale_score_diff"]
 
-    # for forecast_due_date in unique_questions["forecast_due_date"].unique():
-    #     forecast_due_date_mask = df["forecast_due_date"] == forecast_due_date
-    #     min_val, max_val = df.loc[forecast_due_date_mask,"scale"].min(), df.loc[forecast_due_date_mask,"scale"].max() # noqa: B950
-    #     print("scale min/max: ", forecast_due_date, min_val, df.loc[forecast_due_date_mask,"scale"].mean(), max_val) # noqa: B950
-
     ptbl_a_win = pd.pivot_table(
         df[df["winner"] == "model_a"],
         index="model_a",
@@ -1029,7 +1057,7 @@ def combine_rounds(leaderboard, mask_name=None):
     return pd.concat(combined_data, axis=0, ignore_index=True)
 
 
-def compute_elos(leaderboard, leaderboard_suffix):
+def compute_elos(leaderboard, leaderboard_type):
     """Compute the Elo scores."""
 
     def compute_chatbot_elos(filename, mask=None):
@@ -1040,9 +1068,10 @@ def compute_elos(leaderboard, leaderboard_suffix):
             df = combine_rounds(leaderboard, mask)
             with open(filename, "wb") as file:
                 pickle.dump(df, file)
-        # return compute_mle_elo_orig(df)
+
+        return compute_mle_elo_orig(df)
         # return compute_mle_elo_equal_weight(df)
-        return compute_mle_elo(df)
+        # return compute_mle_elo(df)
 
     def transform_elos(elos, elo_col_name):
         elos = elos.reset_index(name=elo_col_name)
@@ -1061,8 +1090,12 @@ def compute_elos(leaderboard, leaderboard_suffix):
     elo_scores = {}
     for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
         logger.info(f"\n\nRunning {to_run}.")
+        filename = f"df_{to_run}_{leaderboard_type}.pkl"
         mask = None if to_run == "overall" else to_run
-        elo_scores[to_run] = compute_chatbot_elos(f"df_{to_run}_{leaderboard_suffix}.pkl", mask)
+        elo_scores[to_run] = compute_chatbot_elos(
+            filename=filename,
+            mask=mask,
+        )
 
     with open("elo_scores.pkl", "wb") as file:
         pickle.dump(elo_scores, file)
@@ -1094,9 +1127,6 @@ def compute_elos(leaderboard, leaderboard_suffix):
     elos["forecast_due_date"] = elos.apply(
         lambda row: model_dates.get((row["organization"], row["model"]), []), axis=1
     )
-
-    print(elos)
-    pprint(elos.columns)
 
     cols = [
         "n_data",
@@ -1154,10 +1184,11 @@ def compute_elos(leaderboard, leaderboard_suffix):
     return elos
 
 
-def make_leaderboard(leaderboard, title, basename, leaderboard_suffix):
+def make_leaderboard(leaderboard, title, basename, leaderboard_type):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = compute_elos(leaderboard, leaderboard_suffix)
+
+    df = compute_elos(leaderboard, leaderboard_type)
 
     files = make_and_upload_html_table(
         df=df,
@@ -1175,7 +1206,7 @@ def worker(task):
             leaderboard=task["leaderboard"],
             title=task["title"],
             basename=task["basename"],
-            leaderboard_suffix="human" if "Human" in task["title"] else "llm",
+            leaderboard_type=task["leaderboard_type"],
         )
     except Exception as e:
         msg = f"Error processing task {task['title']}: {e}"
@@ -1183,7 +1214,7 @@ def worker(task):
         raise ValueError(msg)
 
 
-def get_df_info(df, model):
+def get_df_info(df):
     masks = get_masks(df)
     return {
         "n_data": len(df[masks["data"]]),
@@ -1219,35 +1250,45 @@ def driver(_):
         def read_leaderboard(f):
             with open(f, "rb") as file:
                 leaderboard = pickle.load(file)
-            for entry in leaderboard:
-                entry |= get_df_info(entry["df"], entry["model"])
             return leaderboard
 
-        # leaderboard=read_leaderboard("leaderboard_human.pkl")
-        # for entry in leaderboard:
-        #     print(entry["model"])
-        #     if entry["model"]=="Claude-3-7-Sonnet-20250219 (zero shot with freeze values)":
-        #         pprint(entry)
-        # sys.exit()
+        # # TODO: Look into API calls for these models:
+        # Removing:  Claude-2.1 (scratchpad)
+        # Removing:  Claude-2.1 (scratchpad with freeze values)
+        # Removing:  Mixtral-8x7B-Instruct-V0.1 (superforecaster with news 2)
+        # Removing:  DeepSeek-R1 (zero shot)
+        # Removing:  DeepSeek-R1 (zero shot with freeze values)
+        # Removing:  DeepSeek-R1 (zero shot)
+        # Removing:  DeepSeek-R1 (zero shot with freeze values)
+        # Removing:  DeepSeek-R1 (zero shot)
+        # Removing:  DeepSeek-R1 (zero shot with freeze values)
+        # Removing:  Gemini-2.5-Pro-Exp-03-25 (scratchpad)
+        # Removing:  Gemini-2.5-Pro-Exp-03-25 (scratchpad with freeze values)
+        # Removing:  Gemini-2.5-Pro-Exp-03-25 (zero shot)
+        # Removing:  Gemini-2.5-Pro-Exp-03-25 (zero shot with freeze values)
+        # Removing:  QwQ-32B-Preview (zero shot)
+        # Removing:  QwQ-32B-Preview (zero shot with freeze values)
+
         title = "Leaderboard: overall"
         make_leaderboard(
             leaderboard=read_leaderboard("leaderboard_human.pkl"),
             title=f"Human {title}",
             basename="human_leaderboard_overall",
-            leaderboard_suffix="human",
+            leaderboard_type="human",
         )
         make_leaderboard(
             leaderboard=read_leaderboard("leaderboard_llm.pkl"),
             title=title,
             basename="leaderboard_overall",
-            leaderboard_suffix="llm",
+            leaderboard_type="llm",
         )
         return
 
     cache = {}
     llm_leaderboard = {}
-    llm_and_human_leaderboard = {}
-    # llm_and_human_combo_leaderboard = {}
+    human_leaderboard = {}
+    # human_combo_leaderboard = {}
+    # llm_leaderboard_with_combos = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json") and not file.startswith("2024-12-08")]
     # files1 = [
@@ -1256,8 +1297,8 @@ def driver(_):
     #     "2024-07-21/2024-07-21.ForecastBench.always-1.json",
     #     "2024-07-21/2024-07-21.ForecastBench.human_public.json",
     #     "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
-    #     # "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+    #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
     #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
     #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
     #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
@@ -1293,13 +1334,11 @@ def driver(_):
         )
         executor.shutdown(wait=True)
 
-    # dfs = {k:v for d in dfs for k,v in d.items()}
     logger.info(f"Have access to {env.NUM_CPUS} CPU.")
     for d in dfs:
         f, data = next(iter(d.items()))
         logger.info(f"Scoring forecasts in `{f}`...")
 
-        # data = download_and_read_processed_forecast_file(filename=f)
         if not data or not isinstance(data, dict):
             logger.warning(f"Problem processing {f}. First `continue`.")
             continue
@@ -1341,7 +1380,6 @@ def driver(_):
         df = df[masks["data"] | masks["market"]].reset_index(drop=True)
 
         org_and_model = {"organization": organization, "model": model}
-        # org_and_model = (organization, model)
         is_human_forecast_set = organization == constants.BENCHMARK_NAME and (
             model in [SUPERFORECASTER_MODEL["model"], GENERAL_PUBLIC_MODEL["model"]]
         )
@@ -1354,8 +1392,15 @@ def driver(_):
                 forecast_due_date,
                 question_set_filename=question_set_filename,
             )
-        add_to_llm_and_human_leaderboard(
-            llm_and_human_leaderboard,
+            # add_to_llm_leaderboard_include_combos(
+            #     llm_leaderboard_with_combos,
+            #     org_and_model,
+            #     df,
+            #     forecast_due_date,
+            #     question_set_filename=question_set_filename,
+            # )
+        add_to_human_leaderboard(
+            human_leaderboard,
             org_and_model,
             df,
             forecast_due_date,
@@ -1363,8 +1408,8 @@ def driver(_):
             question_set_filename=question_set_filename,
         )
 
-        # add_to_llm_and_human_combo_leaderboards(
-        #     llm_and_human_combo_leaderboard,
+        # add_to_human_combo_leaderboards(
+        #     human_combo_leaderboard,
         #     org_and_model,
         #     df,
         #     forecast_due_date,
@@ -1379,39 +1424,36 @@ def driver(_):
             "leaderboard": llm_leaderboard["overall"],
             "title": title,
             "basename": "leaderboard_overall",
+            "leaderboard_type": "llm",
         },
-        # {
-        #     "leaderboard": llm_and_human_leaderboard["overall"],
-        #     "title": f"Human {title}",
-        #     "basename": "human_leaderboard_overall_high_level",
-        # },
         {
-            "leaderboard": llm_and_human_leaderboard["overall"],
+            "leaderboard": human_leaderboard["overall"],
             "title": f"Human {title}",
             "basename": "human_leaderboard_overall",
+            "leaderboard_type": "human",
         },
         # {
-        #     "d": llm_and_human_leaderboard["7"],
+        #     "d": human_leaderboard["7"],
         #     "title": f"Human {title} 7 day",
         #     "basename": "human_leaderboard_overall_7",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["30"],
+        #     "d": human_leaderboard["30"],
         #     "title": f"Human {title} 30 day",
         #     "basename": "human_leaderboard_overall_30",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["90"],
+        #     "d": human_leaderboard["90"],
         #     "title": f"Human {title} 90 day",
         #     "basename": "human_leaderboard_overall_90",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["180"],
+        #     "d": human_leaderboard["180"],
         #     "title": f"Human {title} 180 day",
         #     "basename": "human_leaderboard_overall_180",
         # },
         # {
-        #     "d": llm_and_human_combo_leaderboard["overall"],
+        #     "d": human_combo_leaderboard["overall"],
         #     "title": f"Human Combo {title}",
         #     "basename": "human_combo_leaderboard_overall",
         # },
@@ -1421,7 +1463,7 @@ def driver(_):
         pickle.dump(llm_leaderboard["overall"], file)
 
     with open("leaderboard_human.pkl", "wb") as file:
-        pickle.dump(llm_and_human_leaderboard["overall"], file)
+        pickle.dump(human_leaderboard["overall"], file)
 
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")
     with Pool(processes=min(len(tasks), env.NUM_CPUS)) as pool:

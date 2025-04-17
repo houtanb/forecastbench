@@ -1,4 +1,6 @@
 import pickle
+import sys
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
@@ -36,7 +38,7 @@ def abbreviate_unique(names, max_len=12):
 
 def compute_pairwise_win_fraction(
     battles,
-    max_num_models=MAX_NUM_MODELS,
+    # max_num_models=MAX_NUM_MODELS,
     value_col=None,
 ):
     # Times each model wins as Model A
@@ -156,6 +158,56 @@ def get_question_type_lookup(df):
     return question_type_lookup
 
 
+def get_question_type_lookup_half_weight(df):
+    unique_questions = pd.concat(
+        [
+            df[df["source"].isin(DATA_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                    "direction",
+                    "resolution_date_a",
+                    "resolution_date_b",
+                ],
+                ignore_index=True,
+            ),
+            df[df["source"].isin(MARKET_SOURCES)].drop_duplicates(
+                subset=[
+                    "forecast_due_date",
+                    "id",
+                    "source",
+                    "direction",
+                ],
+                ignore_index=True,
+            ),
+        ]
+    )
+    unique_questions["type"] = unique_questions["source"].apply(
+        lambda src: (
+            "data" if src in DATA_SOURCES else ("market" if src in MARKET_SOURCES else "unknown")
+        )
+    )
+    if (unique_questions["type"] == "unknown").any():
+        raise ValueError("Should either be market or data (1).")
+
+    question_type_lookup = {}
+    question_n_lookup = {}
+    for forecast_due_date in unique_questions["forecast_due_date"].unique():
+        df_tmp = unique_questions[unique_questions["forecast_due_date"] == forecast_due_date]
+        n_dataset_questions = (df_tmp["type"] == "data").sum()
+        n_market_questions = (df_tmp["type"] == "market").sum()
+        question_n_lookup[(forecast_due_date, "market")] = (n_dataset_questions, n_market_questions)
+        question_type_lookup[(forecast_due_date, "market")] = 0.5 if n_market_questions else 0.0
+        if n_market_questions and n_dataset_questions:
+            question_type_lookup[(forecast_due_date, "data")] = 0.5 * (
+                n_market_questions / n_dataset_questions
+            )
+        else:
+            question_type_lookup[(forecast_due_date, "data")] = 0.5 if n_dataset_questions else 0.0
+    return question_type_lookup
+
+
 def get_type(df):
     df["type"] = df["source"].apply(
         lambda src: (
@@ -165,31 +217,35 @@ def get_type(df):
     return df
 
 
-def setup_equal_weights(df):
+def compute_pairwise_equal_weight_win_fraction(df):
     question_type_lookup = get_question_type_lookup(df)
     df = get_type(df)
 
     df["per_row_weight"] = df.set_index(["forecast_due_date", "type"]).index.map(
         question_type_lookup
     )
-    return df
-
-
-def compute_pairwise_equal_weight_win_fraction(df, max_num_models=MAX_NUM_MODELS):
-    df = setup_equal_weights(df)
     return compute_pairwise_win_fraction(
-        df, value_col="per_row_weight", max_num_models=MAX_NUM_MODELS
+        df,
+        value_col="per_row_weight",
     )
 
 
-def compute_pairwise_equal_weight_scaled_win_fraction(df, max_num_models=MAX_NUM_MODELS):
-    df = setup_equal_weights(df)
+def compute_pairwise_equal_weight_scaled_win_fraction(df):
+
+    question_type_lookup = get_question_type_lookup_half_weight(df)
+    df = get_type(df)
+
+    df["per_row_weight"] = df.set_index(["forecast_due_date", "type"]).index.map(
+        question_type_lookup
+    )
+
     df["score_diff"] = abs(df["score_a"] - df["score_b"])
-    df["scale"] = df["per_row_weight"] * (1 + df["score_diff"])
-    return compute_pairwise_win_fraction(df, value_col="scale", max_num_models=MAX_NUM_MODELS)
+    df["scale_score_diff"] = 1 + df["score_diff"] ** 2
+    df["scale"] = df["per_row_weight"] * df["scale_score_diff"]
+    return compute_pairwise_win_fraction(df, value_col="scale")
 
 
-def visualize_pairwise_win_fraction(row_beats_col, title, max_num_models=MAX_NUM_MODELS):
+def visualize_pairwise_win_fraction(row_beats_col, title):
 
     # Store original names
     full_index = sorted(row_beats_col.index.tolist())
@@ -253,11 +309,33 @@ def use_elos(row_beats_col, df_leaderboard):
     return row_beats_col
 
 
-def plot_predicted_vs_expected_winrate(row_beats_col, df_leaderboard, leaderboard_suffix):
+def plot_predicted_vs_expected_winrate(
+    row_beats_col, df_leaderboard, weighting, title, leaderboard_type
+):
     pred = []
     actual = []
     hover_text = []
-    score_lookup = df_leaderboard.set_index("org_model")["Score overall"].to_dict()
+
+    if title == "overall":
+        n_col = "Overall info"
+        score_col = "Score overall"
+    elif title == "data":
+        n_col = "Data info"
+        score_col = "Score dataset"
+    elif title == "market_resolved":
+        n_col = "resolv.  info"
+        score_col = "Score market res."
+    elif title == "market_unresolved":
+        n_col = "unres. info"
+        score_col = "Sscore market unres."
+    else:
+        raise ValueError(title)
+
+    score_lookup = df_leaderboard.set_index("org_model")[score_col].to_dict()
+    df_leaderboard[n_col] = df_leaderboard[n_col].apply(
+        lambda x: eval(x) if isinstance(x, str) else x
+    )
+
     for r_model in row_beats_col.index:
         for c_model in row_beats_col.columns:
             val = row_beats_col.loc[r_model, c_model]
@@ -267,9 +345,16 @@ def plot_predicted_vs_expected_winrate(row_beats_col, df_leaderboard, leaderboar
                 e_win_rate = expected_win_rate(xi_m_p - xi_m)
                 pred.append(e_win_rate)
                 actual.append(val)
+                r_model_n = df_leaderboard.loc[
+                    df_leaderboard["org_model"] == r_model, n_col
+                ].values[0][0]
+                c_model_n = df_leaderboard.loc[
+                    df_leaderboard["org_model"] == c_model, n_col
+                ].values[0][0]
                 hover_text.append(
-                    f"r_model: {r_model} ({round(xi_m, 2)})<br>c_model: {c_model} ({round(xi_m_p, 2)})"
-                    f"<br>(x,y): ({round(e_win_rate, 2)},{round(val, 2)})"
+                    f"r_model: {r_model} (score={int(xi_m)}, N={r_model_n} )<br>"
+                    f"c_model: {c_model} (score={int(xi_m_p)}, N={c_model_n})<br>"
+                    f" (x, y): ({round(e_win_rate, 2)},{round(val, 2)})"
                 )
 
     def get_reg(pred, actual):
@@ -278,14 +363,6 @@ def plot_predicted_vs_expected_winrate(row_beats_col, df_leaderboard, leaderboar
         reg_y = slope * reg_x + intercept
         corr_coef = np.corrcoef(pred, actual)[0, 1]
         return reg_x, reg_y, round(corr_coef, 2)
-
-    # winrates = [
-    #     # (xi_diff, pred_win_rate)
-    #     (3, 1-0.0474),
-    #     (4, 1-0.0179),
-    #     (5, 1-0.00669),
-    #     (6, 1-0.00247),
-    # ]
 
     pred_no_ex = []
     actual_no_ex = []
@@ -298,40 +375,40 @@ def plot_predicted_vs_expected_winrate(row_beats_col, df_leaderboard, leaderboar
             hover_text_no_ex.append(hover_text[i])
 
     reg_x, reg_y, corr_coef = get_reg(pred, actual)
-    reg_x_no_ex, reg_y_no_ex, corr_coef_no_ex = get_reg(pred_no_ex, actual_no_ex)
+    # reg_x_no_ex, reg_y_no_ex, corr_coef_no_ex = get_reg(pred_no_ex, actual_no_ex)
 
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(x=pred, y=actual, mode="markers", text=hover_text, hoverinfo="text", name="Orig")
     )
     fig.add_trace(go.Scatter(x=reg_x, y=reg_y, mode="lines", name=f"Regression Line ({corr_coef})"))
-    fig.add_trace(
-        go.Scatter(
-            x=pred_no_ex,
-            y=actual_no_ex,
-            mode="markers",
-            text=hover_text_no_ex,
-            hoverinfo="text",
-            name="No 0 or 1",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=reg_x_no_ex,
-            y=reg_y_no_ex,
-            mode="lines",
-            name=f"Regression Line No 0 or 1 ({corr_coef_no_ex})",
-        )
-    )
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=pred_no_ex,
+    #         y=actual_no_ex,
+    #         mode="markers",
+    #         text=hover_text_no_ex,
+    #         hoverinfo="text",
+    #         name="No 0 or 1",
+    #     )
+    # )
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=reg_x_no_ex,
+    #         y=reg_y_no_ex,
+    #         mode="lines",
+    #         name=f"Regression Line No 0 or 1 ({corr_coef_no_ex})",
+    #     )
+    # )
     fig.update_layout(
-        title="Predicted vs. Actual Winrate",
+        title=f"Predicted vs. Actual Winrate ({weighting}, {title}, {leaderboard_type})",
         xaxis=dict(range=[0, 1], showgrid=True, gridcolor="lightgray"),
         yaxis=dict(range=[0, 1], showgrid=True, gridcolor="lightgray"),
         xaxis_title="Predicted",
         yaxis_title="Actual",
         template="plotly_white",
     )
-    fig.write_html(f"predicted_vs_actual_winrate_{leaderboard_suffix}.html")
+    fig.write_html(f"predicted_vs_actual_winrate_{weighting}_{title}_{leaderboard_type}.html")
 
 
 def expected_win_rate(xi_diff):
@@ -339,31 +416,54 @@ def expected_win_rate(xi_diff):
 
 
 def get_win_rate(df, title):
-    row_beats_col = compute_pairwise_win_fraction(df, MAX_NUM_MODELS)
+    row_beats_col = compute_pairwise_win_fraction(df)
     fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
     fig.write_html(f"{title}_winrate.html")
 
 
-def get_win_rate_comparison(df, df_leaderboard, title, leaderboard_suffix):
-    row_beats_col = compute_pairwise_win_fraction(df, MAX_NUM_MODELS)
-    elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
+def get_win_rate_comparison(df, df_leaderboard, title, leaderboard_type):
+    row_beats_col = compute_pairwise_win_fraction(df)
     fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_winrate_{leaderboard_suffix}.html")
-    fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
-    fig.write_html(f"{title}_winrate_minus_elo_{leaderboard_suffix}.html")
-    plot_predicted_vs_expected_winrate(row_beats_col, df_leaderboard, leaderboard_suffix)
+    fig.write_html(f"{title}_no_weights_winrate_{leaderboard_type}.html")
+
+    if title == "overall":
+        elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
+        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
+        fig.write_html(f"{title}_no_weights_winrate_minus_elo_{leaderboard_type}.html")
+
+    plot_predicted_vs_expected_winrate(
+        row_beats_col, df_leaderboard, "no_weights", title, leaderboard_type
+    )
 
 
-def get_equal_weight_win_rate(df, title):
-    row_beats_col = compute_pairwise_equal_weight_win_fraction(df, MAX_NUM_MODELS)
+def get_equal_weight_win_rate(df, df_leaderboard, title, leaderboard_type):
+    row_beats_col = compute_pairwise_equal_weight_win_fraction(df)
     fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_equal_weight_winrate.html")
+    fig.write_html(f"{title}_equal_weight_winrate_{leaderboard_type}.html")
+
+    if title == "overall":
+        elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
+        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
+        fig.write_html(f"{title}_equal_weight_winrate_minus_elo_{leaderboard_type}.html")
+
+    plot_predicted_vs_expected_winrate(
+        row_beats_col, df_leaderboard, "equal_weight", title, leaderboard_type
+    )
 
 
-def get_equal_weight_scaled_win_rate(df, title):
-    row_beats_col = compute_pairwise_equal_weight_scaled_win_fraction(df, MAX_NUM_MODELS)
+def get_equal_weight_scaled_win_rate(df, df_leaderboard, title, leaderboard_type):
+    row_beats_col = compute_pairwise_equal_weight_scaled_win_fraction(df)
     fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
     fig.write_html(f"{title}_equal_weight_scaled_winrate.html")
+
+    if title == "overall":
+        elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
+        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
+        fig.write_html(f"{title}_equal_weight_scaled_winrate_minus_elo_{leaderboard_type}.html")
+
+    plot_predicted_vs_expected_winrate(
+        row_beats_col, df_leaderboard, "equal_weight_scaled", title, leaderboard_type
+    )
 
 
 def read_pickle_and_get_winrate(filename, title, mask=None):
@@ -380,51 +480,70 @@ def read_pickle_and_get_winrate(filename, title, mask=None):
 def read_pickle_and_csv_and_get_winrate(
     filename,
     title,
-    leaderboard_suffix,
+    leaderboard_type,
     mask,
 ):
-
     with open(filename, "rb") as file:
         df = pickle.load(file)
 
-    with open(filename, "rb") as file:
-        leaderboard_file = (
-            "equal_weight_performance_scale/"
-            + (f"{leaderboard_suffix}_" if leaderboard_suffix == "human" else "")
-            + "leaderboard_overall.csv"
-        )
-        df_leaderboard = pd.read_csv(leaderboard_file)
-        df_leaderboard["org_model"] = df_leaderboard["Organization"] + ";" + df_leaderboard["Model"]
-        df_leaderboard = df_leaderboard[["org_model", "Score overall"]]
+    for weighting in [
+        "orig_no_weights",
+        "equal_weight",
+        "equal_weight_performance_scale",
+    ]:
+        print(f"  Running {weighting}")
+        with open(filename, "rb") as file:
+            leaderboard_file = (
+                f"{weighting}/"
+                + (f"{leaderboard_type}_" if leaderboard_type == "human" else "")
+                + "leaderboard_overall.csv"
+            )
+            df_leaderboard = pd.read_csv(leaderboard_file)
+            df_leaderboard["org_model"] = (
+                df_leaderboard["Organization"] + ";" + df_leaderboard["Model"]
+            )
+            # df_leaderboard = df_leaderboard[["org_model", "Score overall"]]
 
-    print(" * win/loss")
-    get_win_rate_comparison(
-        df=df,
-        df_leaderboard=df_leaderboard,
-        title=title,
-        leaderboard_suffix=leaderboard_suffix,
-    )
-    # print(" * win/loss equal weight")
-    # get_equal_weight_win_rate(df, title)
-    # print(" * win/loss equal weight & scaled")
-    # get_equal_weight_scaled_win_rate(df, title)
+        if weighting == "orig_no_weights":
+            get_win_rate_comparison(
+                df=df.copy(),
+                df_leaderboard=df_leaderboard,
+                title=title,
+                leaderboard_type=leaderboard_type,
+            )
+        elif weighting == "equal_weight":
+            get_equal_weight_win_rate(
+                df=df.copy(),
+                df_leaderboard=df_leaderboard,
+                title=title,
+                leaderboard_type=leaderboard_type,
+            )
+        elif weighting == "equal_weight_performance_scale":
+            get_equal_weight_scaled_win_rate(
+                df=df.copy(),
+                df_leaderboard=df_leaderboard,
+                title=title,
+                leaderboard_type=leaderboard_type,
+            )
+        else:
+            raise ValueError(weighting)
 
 
 if __name__ == "__main__":
-    leaderboard_suffix = "human"
+    leaderboard_type = "llm"
     elo_scores = {}
     elo_diffs = {}
     for to_run in [
-        "overall",
-    ]:  # "data", "market", "market_resolved", "market_unresolved"]:
+        "overall",  # "data", "market", "market_resolved", "market_unresolved",
+    ]:
         print(f"Getting {to_run} win rate.")
         mask = None if to_run == "overall" else to_run
         # elo_scores[to_run] = read_pickle_and_get_winrate(
-        #     filename=f"df_{to_run}_{leaderboard_suffix}.pkl", title=to_run, mask=mask
+        #     filename=f"df_{to_run}_{leaderboard_type}.pkl", title=to_run, mask=mask
         # )
         elo_diffs[to_run] = read_pickle_and_csv_and_get_winrate(
-            filename=f"df_{to_run}_{leaderboard_suffix}.pkl",
+            filename=f"df_{to_run}_{leaderboard_type}.pkl",
             title=to_run,
-            leaderboard_suffix=leaderboard_suffix,
+            leaderboard_type=leaderboard_type,
             mask=mask,
         )

@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-MAX_NUM_MODELS = 30
+# MAX_NUM_MODELS = 30
 DATA_SOURCES = ["acled", "wikipedia", "dbnomics", "fred", "yfinance"]
 MARKET_SOURCES = [
     "manifold",
@@ -91,6 +91,28 @@ def compute_pairwise_win_fraction(
             aggfunc="size",
             fill_value=0,
         )
+
+    a_win_ptbl = pd.pivot_table(
+        battles[battles["winner"] == "model_a"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
+    )
+    b_win_ptbl = pd.pivot_table(
+        battles[battles["winner"] == "model_b"],
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
+    )
+    num_battles_ptbl = pd.pivot_table(
+        battles,
+        index="model_a",
+        columns="model_b",
+        aggfunc="size",
+        fill_value=0,
+    )
 
     # Computing the proportion of wins for each model as A and as B
     # against all other models
@@ -245,7 +267,7 @@ def compute_pairwise_equal_weight_scaled_win_fraction(df):
     return compute_pairwise_win_fraction(df, value_col="scale")
 
 
-def visualize_pairwise_win_fraction(row_beats_col, title):
+def visualize_pairwise_win_fraction(row_beats_col, title, leaderboard_type, weighting):
 
     # Store original names
     full_index = sorted(row_beats_col.index.tolist())
@@ -267,7 +289,6 @@ def visualize_pairwise_win_fraction(row_beats_col, title):
         row_beats_col_short,
         color_continuous_scale="RdBu",
         text_auto=".2f",
-        title=title,
     )
 
     fig.update_traces(
@@ -280,7 +301,8 @@ def visualize_pairwise_win_fraction(row_beats_col, title):
     )
 
     fig.update_layout(
-        xaxis_title=" Model B: Loser",
+        title_text="Model B: Loser",
+        xaxis_title=f"Win rate comparison: ({weighting}, {title}, {leaderboard_type})",
         yaxis_title="Model A: Winner",
         xaxis_side="top",
         height=1700,
@@ -408,28 +430,42 @@ def plot_predicted_vs_expected_winrate(
         yaxis_title="Actual",
         template="plotly_white",
     )
-    fig.write_html(f"predicted_vs_actual_winrate_{weighting}_{title}_{leaderboard_type}.html")
+    write_html_and_png(
+        fig=fig, filename=f"predicted_vs_actual_winrate_{weighting}_{title}_{leaderboard_type}"
+    )
 
 
 def expected_win_rate(xi_diff):
     return 1 / (1 + 10 ** (xi_diff / 400))
 
 
-def get_win_rate(df, title):
-    row_beats_col = compute_pairwise_win_fraction(df)
-    fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_winrate.html")
+# def get_win_rate(df, title):
+#     row_beats_col = compute_pairwise_win_fraction(df)
+#     fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
+#     fig.write_html(f"{title}_winrate.html")
+
+
+def write_html_and_png(fig, filename):
+    fig.write_html(f"{filename}.html")
+    fig.write_image(f"{filename}.png")
 
 
 def get_win_rate_comparison(df, df_leaderboard, title, leaderboard_type):
+    weighting = "no_weights"
     row_beats_col = compute_pairwise_win_fraction(df)
-    fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_no_weights_winrate_{leaderboard_type}.html")
+    fig = visualize_pairwise_win_fraction(
+        row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+    )
+    write_html_and_png(fig=fig, filename=f"{title}_no_weights_winrate_{leaderboard_type}")
 
     if title == "overall":
         elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
-        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
-        fig.write_html(f"{title}_no_weights_winrate_minus_elo_{leaderboard_type}.html")
+        fig = visualize_pairwise_win_fraction(
+            elo_row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+        )
+        write_html_and_png(
+            fig=fig, filename=f"{title}_no_weights_winrate_minus_elo_{leaderboard_type}"
+        )
 
     plot_predicted_vs_expected_winrate(
         row_beats_col, df_leaderboard, "no_weights", title, leaderboard_type
@@ -437,14 +473,21 @@ def get_win_rate_comparison(df, df_leaderboard, title, leaderboard_type):
 
 
 def get_equal_weight_win_rate(df, df_leaderboard, title, leaderboard_type):
+    weighting = "equal_weight"
     row_beats_col = compute_pairwise_equal_weight_win_fraction(df)
-    fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_equal_weight_winrate_{leaderboard_type}.html")
+    fig = visualize_pairwise_win_fraction(
+        row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+    )
+    write_html_and_png(fig=fig, filename=f"{title}_equal_weight_winrate_{leaderboard_type}")
 
     if title == "overall":
         elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
-        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
-        fig.write_html(f"{title}_equal_weight_winrate_minus_elo_{leaderboard_type}.html")
+        fig = visualize_pairwise_win_fraction(
+            elo_row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+        )
+        write_html_and_png(
+            fig=fig, filename=f"{title}_equal_weight_winrate_minus_elo_{leaderboard_type}"
+        )
 
     plot_predicted_vs_expected_winrate(
         row_beats_col, df_leaderboard, "equal_weight", title, leaderboard_type
@@ -452,37 +495,46 @@ def get_equal_weight_win_rate(df, df_leaderboard, title, leaderboard_type):
 
 
 def get_equal_weight_scaled_win_rate(df, df_leaderboard, title, leaderboard_type):
+    weighting = "equal_weight_scaled"
     row_beats_col = compute_pairwise_equal_weight_scaled_win_fraction(df)
-    fig = visualize_pairwise_win_fraction(row_beats_col, title=title)
-    fig.write_html(f"{title}_equal_weight_scaled_winrate.html")
+    fig = visualize_pairwise_win_fraction(
+        row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+    )
+    write_html_and_png(fig=fig, filename=f"{title}_equal_weight_scaled_winrate")
 
     if title == "overall":
         elo_row_beats_col = use_elos(row_beats_col.copy(), df_leaderboard)
-        fig = visualize_pairwise_win_fraction(elo_row_beats_col, title=title)
-        fig.write_html(f"{title}_equal_weight_scaled_winrate_minus_elo_{leaderboard_type}.html")
+        fig = visualize_pairwise_win_fraction(
+            elo_row_beats_col, title=title, leaderboard_type=leaderboard_type, weighting=weighting
+        )
+        write_html_and_png(
+            fig=fig, filename=f"{title}_equal_weight_scaled_winrate_minus_elo_{leaderboard_type}"
+        )
 
     plot_predicted_vs_expected_winrate(
         row_beats_col, df_leaderboard, "equal_weight_scaled", title, leaderboard_type
     )
 
 
-def read_pickle_and_get_winrate(filename, title, mask=None):
-    with open(filename, "rb") as file:
-        df = pickle.load(file)
-    print(" * win/loss")
-    get_win_rate(df, title)
-    # print(" * win/loss equal weight")
-    # get_equal_weight_win_rate(df, title)
-    # print(" * win/loss equal weight & scaled")
-    # get_equal_weight_scaled_win_rate(df, title)
+# def read_pickle_and_get_winrate(filename, title, mask=None):
+#     with open(filename, "rb") as file:
+#         df = pickle.load(file)
+#     print(" * win/loss")
+#     get_win_rate(df, title)
+#     # print(" * win/loss equal weight")
+#     # get_equal_weight_win_rate(df, title)
+#     # print(" * win/loss equal weight & scaled")
+#     # get_equal_weight_scaled_win_rate(df, title)
 
 
 def read_pickle_and_csv_and_get_winrate(
     filename,
     title,
     leaderboard_type,
-    mask,
 ):
+    EXPERIMENT_FOLDER = "2024-07-21-only"
+    # WEIGHTING = "equal_weight_performance_scale" # "orig_no_weights" # "equal_weight" # "equal_weight_performance_scale"
+
     with open(filename, "rb") as file:
         df = pickle.load(file)
 
@@ -494,10 +546,11 @@ def read_pickle_and_csv_and_get_winrate(
         print(f"  Running {weighting}")
         with open(filename, "rb") as file:
             leaderboard_file = (
-                f"{weighting}/"
+                f"{EXPERIMENT_FOLDER}/{weighting}/"
                 + (f"{leaderboard_type}_" if leaderboard_type == "human" else "")
                 + "leaderboard_overall.csv"
             )
+            print(f"  Openning {leaderboard_file}")
             df_leaderboard = pd.read_csv(leaderboard_file)
             df_leaderboard["org_model"] = (
                 df_leaderboard["Organization"] + ";" + df_leaderboard["Model"]
@@ -530,20 +583,13 @@ def read_pickle_and_csv_and_get_winrate(
 
 
 if __name__ == "__main__":
-    leaderboard_type = "llm"
-    elo_scores = {}
-    elo_diffs = {}
-    for to_run in [
-        "overall",  # "data", "market", "market_resolved", "market_unresolved",
-    ]:
-        print(f"Getting {to_run} win rate.")
-        mask = None if to_run == "overall" else to_run
-        # elo_scores[to_run] = read_pickle_and_get_winrate(
-        #     filename=f"df_{to_run}_{leaderboard_type}.pkl", title=to_run, mask=mask
-        # )
-        elo_diffs[to_run] = read_pickle_and_csv_and_get_winrate(
-            filename=f"df_{to_run}_{leaderboard_type}.pkl",
-            title=to_run,
-            leaderboard_type=leaderboard_type,
-            mask=mask,
-        )
+    for leaderboard_type in ["human", "llm"]:
+        for to_run in [
+            "overall",  # "data", "market", "market_resolved", "market_unresolved",
+        ]:
+            print(f"Getting {to_run} {leaderboard_type} win rate.")
+            read_pickle_and_csv_and_get_winrate(
+                filename=f"df_{to_run}_{leaderboard_type}.pkl",
+                title=to_run,
+                leaderboard_type=leaderboard_type,
+            )

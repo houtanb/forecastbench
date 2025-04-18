@@ -127,18 +127,24 @@ def has_too_many_imputed(df, org_and_model) -> bool:
       market questions.
     * Always include ForecastBench models
     """
+    if org_and_model["organization"] == constants.BENCHMARK_NAME:
+        return False
+
+    MIN_MARKET_RESOLVED = 10
     MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
     masks = get_masks(df)
     df_data = df[masks["data"]]
     df_market = df[masks["market"]]
+    df_market_resolved = df[masks["market_resolved"]]
 
-    if org_and_model["organization"] != constants.BENCHMARK_NAME and (
+    if len(df_market_resolved) < MIN_MARKET_RESOLVED or (
         df_data["imputed"].mean() > MIN_DATA_MISSING_PCT
         or df_market["imputed"].mean() > MIN_MARKET_MISSING_PCT
     ):
         logger.info(f"DROPPING {org_and_model}")
         logger.info(f" * % imputed data: {round(df_data['imputed'].mean() * 100, 2)}")
         logger.info(f" * % imputed market: {round(df_market['imputed'].mean() * 100, 2)}")
+        logger.info(f" * N market resolved:: {len(df_market_resolved)}")
         return True
     return False
 
@@ -1021,17 +1027,13 @@ def combine_rounds(leaderboard, mask_name=None):
         df_model_a = mask_model(value_a["df"].copy())
         df_model_a["model"] = get_model_name(value_a)
         print(value_a["organization"], value_a["model"], value_a["forecast_due_date"])
+        index = 0
         for _, value_b in enumerate(leaderboard[i + 1 :]):
             if value_a["forecast_due_date"] == value_b["forecast_due_date"] and not (
                 value_a["organization"] == value_b["organization"]
                 and value_a["model"] == value_b["model"]
             ):
-                print(
-                    "      **** ",
-                    value_b["organization"],
-                    value_b["model"],
-                    value_b["forecast_due_date"],
-                )
+                index += 1
                 df_model_b = mask_model(value_b["df"].copy())
                 df_model_b["model"] = get_model_name(value_b)
                 if df_model_a.empty or df_model_b.empty:
@@ -1053,7 +1055,7 @@ def combine_rounds(leaderboard, mask_name=None):
                     raise ValueError("This merge should not result in an empty df.")
 
                 combined_data.append(df_tmp)
-
+        print(f"      **** compared to {index} models.")
     return pd.concat(combined_data, axis=0, ignore_index=True)
 
 
@@ -1291,32 +1293,19 @@ def driver(_):
     # llm_leaderboard_with_combos = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [file for file in files if file.endswith(".json") and not file.startswith("2024-12-08")]
-    # files1 = [
-    #     # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
+    # files = [
+    #     "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
     #     "2024-07-21/2024-07-21.ForecastBench.always-0.json",
     #     "2024-07-21/2024-07-21.ForecastBench.always-1.json",
     #     "2024-07-21/2024-07-21.ForecastBench.human_public.json",
     #     "2024-07-21/2024-07-21.ForecastBench.human_super.json",
     #     "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
     #     "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-    #     # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
+    #     '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
     #     "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-    #     # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
-    #     "2024-12-08/2024-12-08.ForecastBench.always-0.json",
-    #     "2024-12-08/2024-12-08.ForecastBench.always-1.json",
-    #     # '2024-12-08/2024-12-08.ForecastBench.imputed-forecaster.json',
-    #     # "2024-12-08/2024-12-08.ForecastBench.naive-forecaster.json",
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_scratchpad_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-mini-2024-09-12_zero_shot_with_freeze_values.json',
-    #     # '2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad.json',
-    #     # "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_scratchpad_with_freeze_values.json",
-    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot.json",
-    #     "2024-12-08/2024-12-08.OpenAI.o1-preview-2024-09-12_zero_shot_with_freeze_values.json",
-    #     "2024-12-08/2024-12-08.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-    #     # "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
+    #     "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
+    #     "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
+    #     "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
     #     "2025-03-02/2025-03-02.ForecastBench.always-0.json",
     #     "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
     # ]

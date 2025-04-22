@@ -4,6 +4,7 @@ import itertools
 import json
 import logging
 import math
+import multiprocessing as mp
 import os
 import pickle
 import sys
@@ -11,11 +12,14 @@ import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from functools import partial
 from multiprocessing import Pool
 from pprint import pprint
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
+from scipy.special import expit
 from sklearn.linear_model import LogisticRegression
 from termcolor import colored
 from tqdm import tqdm
@@ -331,6 +335,8 @@ def make_and_upload_html_table(df, title, basename):
         ignore_index=True,
     )
 
+    df["Ranking"] = df["final_ranking"]
+
     # Round columns to 3 decimal places
     numeric_cols = df.select_dtypes(include="number").columns
     df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
@@ -340,15 +346,17 @@ def make_and_upload_html_table(df, title, basename):
     df["elo_market"] = df["elo_market"].round().astype(int)
     df["elo_market_resolved"] = df["elo_market_resolved"].round().astype(int)
     df["elo_market_unresolved"] = df["elo_market_unresolved"].round().astype(int)
+    df["rating_q025"] = df["rating_q025"].round().astype(int)
+    df["rating_q975"] = df["rating_q975"].round().astype(int)
 
     # Insert ranking
-    df.insert(loc=0, column="Ranking", value="")
-    df["score_diff"] = df["elo_overall"] - df["elo_overall"].shift(1)
-    for index, row in df.iterrows():
-        if row["score_diff"] != 0:
-            prev_rank = index + 1
-        df.loc[index, "Ranking"] = prev_rank
-    df.drop(columns="score_diff", inplace=True)
+    # df.insert(loc=0, column="Ranking", value="")
+    # df["score_diff"] = df["elo_overall"] - df["elo_overall"].shift(1)
+    # for index, row in df.iterrows():
+    #     if row["score_diff"] != 0:
+    #         prev_rank = index + 1
+    #     df.loc[index, "Ranking"] = prev_rank
+    # df.drop(columns="score_diff", inplace=True)
 
     for c in [
         "pct_imputed_market",
@@ -381,6 +389,8 @@ def make_and_upload_html_table(df, title, basename):
         lambda row: (row["n_overall"], row["pct_imputed_overall"]), axis=1
     )
 
+    df["95_cis"] = "[" + df["rating_q025"].astype(str) + ", " + df["rating_q975"].astype(str) + "]"
+
     df = df[
         [
             "Ranking",
@@ -395,6 +405,7 @@ def make_and_upload_html_table(df, title, basename):
             "market_unresolved_info",
             "elo_market",
             "elo_overall",
+            "95_cis",
             "overall_info",
         ]
     ]
@@ -411,6 +422,7 @@ def make_and_upload_html_table(df, title, basename):
             "market_resolved_info": "resolv.  info",
             "market_unresolved_info": "unres. info",
             "elo_overall": "Score overall",
+            "95_cis": "95% CI",
             "overall_info": "Overall info",
         }
     )
@@ -1006,6 +1018,33 @@ def compute_mle_elo(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
     return pd.Series(elo_scores, index=models.index).sort_values(ascending=False)
 
 
+def compute_bootstrap_bt(
+    battles,
+    num_round=100,
+    base=10.0,
+    scale=400.0,
+    init_rating=1000.0,
+    tol=1e-6,
+    num_cpu=env.NUM_CPUS,
+):
+    matchups, outcomes, models, weights = preprocess_for_bt(battles)
+    # bootstrap sample the unique outcomes and their counts directly using the multinomial distribution
+    rng = np.random.default_rng(seed=0)
+    idxs = rng.multinomial(n=len(battles), pvals=weights / weights.sum(), size=(num_round))
+    # only the distribution over their occurance counts changes between samples (and it can be 0)
+    boot_weights = idxs.astype(np.float64) / len(battles)
+
+    # the only thing different across samples is the distribution of weights
+    bt_fn = partial(fit_bt, matchups, outcomes, n_models=len(models), alpha=np.log(base), tol=tol)
+    with mp.Pool(num_cpu if num_cpu else os.cpu_count()) as pool:
+        results = list(tqdm(pool.imap_unordered(bt_fn, boot_weights), total=num_round))
+
+    ratings = np.array(results)
+    scaled_ratings = scale_and_offset(ratings, models, scale, init_rating)
+    df = pd.DataFrame(scaled_ratings, columns=models)
+    return df[df.median().sort_values(ascending=False).index]
+
+
 def combine_rounds(leaderboard, mask_name=None):
     """Combine dataframes for models across forecasting rounds."""
 
@@ -1059,6 +1098,87 @@ def combine_rounds(leaderboard, mask_name=None):
     return pd.concat(combined_data, axis=0, ignore_index=True)
 
 
+def get_matchups_models(df):
+    n_rows = len(df)
+    model_indices, models = pd.factorize(pd.concat([df["model_a"], df["model_b"]]))
+    matchups = np.column_stack([model_indices[:n_rows], model_indices[n_rows:]])
+    return matchups, models.to_list()
+
+
+def preprocess_for_bt(df):
+    """in BT we only need the unique (matchup,outcome) sets along with the weights of how often they occur"""
+    n_rows = len(df)
+    # the 3 columns of schedule represent: model_a id, model_b id, outcome_id
+    schedule = np.full((n_rows, 3), fill_value=1, dtype=np.int32)
+    # set the two model cols by mapping the model names to their int ids
+    schedule[:, [0, 1]], models = get_matchups_models(df)
+    # map outcomes to integers (must be same dtype as model ids so it can be in the same array)
+    # model_a win -> 2, tie -> 1 (prefilled by default), model_b win -> 0
+    schedule[df["winner"] == "model_a", 2] = 2
+    schedule[df["winner"] == "model_b", 2] = 0
+    # count the number of occurances of each observed result
+    matchups_outcomes, weights = np.unique(schedule, return_counts=True, axis=0)
+    matchups = matchups_outcomes[:, [0, 1]]
+    # map 2 -> 1.0, 1 -> 0.5, 0 -> 0.0 which will be used as labels during optimization
+    outcomes = matchups_outcomes[:, 2].astype(np.float64) / 2.0
+    weights = weights.astype(np.float64)
+    # each possible result is weighted according to number of times it occured in the dataset
+    return matchups, outcomes, models, weights
+
+
+def bt_loss_and_grad(ratings, matchups, outcomes, weights, alpha=1.0):
+    matchup_ratings = ratings[matchups]
+    logits = alpha * (matchup_ratings[:, 0] - matchup_ratings[:, 1])
+    probs = expit(logits)
+    # this form naturally counts a draw as half a win and half a loss
+    loss = -((np.log(probs) * outcomes + np.log(1.0 - probs) * (1.0 - outcomes)) * weights).sum()
+    matchups_grads = -alpha * (outcomes - probs) * weights
+    model_grad = np.zeros_like(ratings)
+    # aggregate gradients at the model level using the indices in matchups
+    np.add.at(
+        model_grad,
+        matchups[:, [0, 1]],
+        matchups_grads[:, None] * np.array([1.0, -1.0], dtype=np.float64),
+    )
+    return loss, model_grad
+
+
+def fit_bt(matchups, outcomes, weights, n_models, alpha, tol=1e-6):
+    initial_ratings = np.zeros(n_models, dtype=np.float64)
+    result = minimize(
+        fun=bt_loss_and_grad,
+        x0=initial_ratings,
+        args=(matchups, outcomes, weights, alpha),
+        jac=True,
+        method="L-BFGS-B",
+        options={"disp": False, "maxiter": 100, "gtol": tol},
+    )
+    return result["x"]
+
+
+def scale_and_offset(
+    ratings,
+    models,
+    scale=400,
+    init_rating=1000,
+    baseline_model="mixtral-8x7b-instruct-v0.1",
+    baseline_rating=1114,
+):
+    """convert ratings from the natural scale to the Elo rating scale with an anchored baseline"""
+    scaled_ratings = (ratings * scale) + init_rating
+    if baseline_model in models:
+        baseline_idx = models.index(baseline_model)
+        scaled_ratings += baseline_rating - scaled_ratings[..., [baseline_idx]]
+    return scaled_ratings
+
+
+def compute_bt(df, base=10.0, scale=400.0, init_rating=1000, tol=1e-6):
+    matchups, outcomes, models, weights = preprocess_for_bt(df)
+    ratings = fit_bt(matchups, outcomes, weights, len(models), math.log(base), tol)
+    scaled_ratings = scale_and_offset(ratings, models, scale, init_rating=init_rating)
+    return pd.Series(scaled_ratings, index=models).sort_values(ascending=False)
+
+
 def compute_elos(leaderboard, leaderboard_type):
     """Compute the Elo scores."""
 
@@ -1071,15 +1191,51 @@ def compute_elos(leaderboard, leaderboard_type):
             with open(filename, "wb") as file:
                 pickle.dump(df, file)
 
-        return compute_mle_elo_orig(df)
+        bootstrap_df = compute_bootstrap_bt(df, num_round=1000, num_cpu=env.NUM_CPUS)
+        elo_rating_final = compute_bt(df)
+
+        model_order = list(elo_rating_final.keys())
+
+        model_rating_q025 = bootstrap_df.quantile(0.025)
+        model_rating_q975 = bootstrap_df.quantile(0.975)
+
+        # compute ranking based on CI
+        ranking = {}
+        for i, model_a in enumerate(model_order):
+            ranking[model_a] = 1
+            for j, model_b in enumerate(model_order):
+                if i == j:
+                    continue
+                if model_rating_q025[model_b] > model_rating_q975[model_a]:
+                    ranking[model_a] += 1
+
+        # leaderboard_table_df: elo rating, variance, 95% interval, number of df
+        leaderboard_table_df = pd.DataFrame(
+            {
+                "rating": elo_rating_final,
+                "variance": bootstrap_df.var(),
+                "rating_q975": bootstrap_df.quantile(0.975),
+                "rating_q025": bootstrap_df.quantile(0.025),
+                "num_battles": df["model_a"]
+                .value_counts()
+                .add(df["model_b"].value_counts(), fill_value=0),
+                "final_ranking": pd.Series(ranking),
+            }
+        ).sort_values(by="final_ranking")
+        # print_all(leaderboard_table_df)
+        return leaderboard_table_df
+        # return compute_mle_elo_orig(df)
         # return compute_mle_elo_equal_weight(df)
         # return compute_mle_elo(df)
 
     def transform_elos(elos, elo_col_name):
-        elos = elos.reset_index(name=elo_col_name)
+        # elos = elos.reset_index(name=elo_col_name)
+        elos[elo_col_name] = elos["rating"]
+        elos = elos.reset_index(drop=False)
         elos[["organization", "model"]] = elos["index"].str.split(";", expand=True)
         elos = elos.drop(columns=["index"])
         elos = elos.sort_values(by=elo_col_name, ascending=False)
+        # elos = elos.sort_values(by="final_ranking", ascending=True)
         elos = elos[
             [
                 "organization",
@@ -1089,18 +1245,23 @@ def compute_elos(leaderboard, leaderboard_type):
         ]
         return elos
 
-    elo_scores = {}
-    for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
-        logger.info(f"\n\nRunning {to_run}.")
-        filename = f"df_{to_run}_{leaderboard_type}.pkl"
-        mask = None if to_run == "overall" else to_run
-        elo_scores[to_run] = compute_chatbot_elos(
-            filename=filename,
-            mask=mask,
-        )
+    elos_file = "elo_scores.pkl"
+    if os.path.exists(elos_file):
+        with open(elos_file, "rb") as file:
+            elo_scores = pickle.load(file)
+    else:
+        elo_scores = {}
+        for to_run in ["overall", "data", "market", "market_resolved", "market_unresolved"]:
+            logger.info(f"\n\nRunning {to_run}.")
+            filename = f"df_{to_run}_{leaderboard_type}.pkl"
+            mask = None if to_run == "overall" else to_run
+            elo_scores[to_run] = compute_chatbot_elos(
+                filename=filename,
+                mask=mask,
+            )
 
-    with open("elo_scores.pkl", "wb") as file:
-        pickle.dump(elo_scores, file)
+        with open(elos_file, "wb") as file:
+            pickle.dump(elo_scores, file)
 
     data_elos = transform_elos(elo_scores["data"], elo_col_name="elo_data")
     market_elos = transform_elos(elo_scores["market"], elo_col_name="elo_market")
@@ -1118,6 +1279,22 @@ def compute_elos(leaderboard, leaderboard_type):
     elos = pd.merge(elos, market_unresolved_elos, on=["organization", "model"]).reset_index(
         drop=True
     )
+
+    elo_scores_overall = elo_scores["overall"].reset_index(drop=False)
+    elo_scores_overall[["organization", "model"]] = elo_scores_overall["index"].str.split(
+        ";", expand=True
+    )
+    elo_scores_overall = elo_scores_overall.drop(columns=["index"])
+    elos_cis = elo_scores_overall[
+        [
+            "organization",
+            "model",
+            "final_ranking",
+            "rating_q025",
+            "rating_q975",
+        ]
+    ]
+    elos = pd.merge(elos, elos_cis, on=["organization", "model"]).reset_index(drop=True)
 
     model_dates = defaultdict(set)
     for entry in leaderboard:
@@ -1152,8 +1329,6 @@ def compute_elos(leaderboard, leaderboard_type):
                     elos.loc[org_mask, c] = np.float64(entry[c])
             else:
                 elos.loc[org_mask, c] += np.float64(entry[c])
-
-    # print([d for d in leaderboard if d["model"]=="Naive Forecaster"])
 
     cols = [
         ("pct_imputed_market", "n_market"),
@@ -1278,12 +1453,12 @@ def driver(_):
             basename="human_leaderboard_overall",
             leaderboard_type="human",
         )
-        make_leaderboard(
-            leaderboard=read_leaderboard("leaderboard_llm.pkl"),
-            title=title,
-            basename="leaderboard_overall",
-            leaderboard_type="llm",
-        )
+        # make_leaderboard(
+        #     leaderboard=read_leaderboard("leaderboard_llm.pkl"),
+        #     title=title,
+        #     basename="leaderboard_overall",
+        #     leaderboard_type="llm",
+        # )
         return
 
     cache = {}

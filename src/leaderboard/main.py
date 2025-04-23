@@ -187,7 +187,7 @@ def has_too_many_imputed(df, org_and_model) -> bool:
     if org_and_model["organization"] == constants.BENCHMARK_NAME:
         return False
 
-    MIN_MARKET_RESOLVED = 10
+    MIN_MARKET_RESOLVED = 5
     MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
     masks = get_masks(df)
     df_data = df[masks["data"]]
@@ -883,21 +883,21 @@ def merge_common_models(df):
 
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 3
-    mask_naive_forecaster = get_naive_forecaster_mask(df)
+    n_replications = 100
+    mask_naive_forecaster_df = get_naive_forecaster_mask(df)
     bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
 
     def sample_block_indices_by_source(df, mask):
         """Sample everything where mask is true, source by source."""
-        sampled_indices = {}
+        sampled_indices = []
         for source in df[mask]["source"].unique():
             source_mask = mask & (df["source"] == source)
             available_indices = df.loc[source_mask].index.to_numpy()
-            sampled_indices[source] = np.random.choice(
-                available_indices, size=len(available_indices), replace=True
+            sampled_indices.append(
+                np.random.choice(available_indices, size=len(available_indices), replace=True)
             )
-        return sampled_indices
+        return np.concatenate(sampled_indices)
 
     def sample_block_indices_no_source(df, mask):
         """Sample everything where mask is true."""
@@ -912,21 +912,44 @@ def bootstrap_BSS_CI(df):
         if forecast_due_date in sample_indices.keys():
             return sample_indices[forecast_due_date]
 
-        masks = get_masks(df)
+        if isinstance(forecast_due_date, tuple):
+            for f in forecast_due_date:
+                get_sample_indices(
+                    df[df["forecast_due_date"].astype(str) == f].reset_index(drop=True),
+                    f,
+                    sample_indices,
+                )
 
-        sampled_indices = {}
-        sampled_indices["data"] = sample_block_indices_by_source(df, masks["data"])
-        sampled_indices["market_resolved"] = sample_block_indices_no_source(
-            df,
-            masks["market_resolved"],
-        )
-        sampled_indices["market_unresolved"] = sample_block_indices_no_source(
-            df,
-            masks["market_unresolved"],
-        )
-        sample_indices[forecast_due_date] = sampled_indices
+            data = []
+            market_resolved = []
+            market_unresolved = []
+            for f in forecast_due_date:
+                offset = df[df["forecast_due_date"].astype(str) == f].index[0]
+                data.append(offset + sample_indices[f]["data"])
+                market_resolved.append(offset + sample_indices[f]["market_resolved"])
+                market_unresolved.append(offset + sample_indices[f]["market_unresolved"])
 
-        return sampled_indices
+            indices = {}
+            indices["data"] = np.concatenate(data)
+            indices["market_resolved"] = np.concatenate(market_resolved)
+            indices["market_unresolved"] = np.concatenate(market_unresolved)
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
+        else:
+            masks = get_masks(df)
+
+            indices = {}
+            indices["data"] = sample_block_indices_by_source(df, masks["data"])
+            indices["market_resolved"] = sample_block_indices_no_source(
+                df,
+                masks["market_resolved"],
+            )
+            indices["market_unresolved"] = sample_block_indices_no_source(
+                df,
+                masks["market_unresolved"],
+            )
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
 
     def apply_sample_indices(df, indices):
         """Apply the sample provided to df."""
@@ -935,31 +958,18 @@ def bootstrap_BSS_CI(df):
 
         masks = get_masks(df)
 
-        for block, sources in indices.items():
+        for block, boot_indices in indices.items():
             # Define the mask for the block.
             # Here you must know how each block is defined. For example:
             if block not in masks.keys():
                 raise ValueError("should not arrive here (3).")
 
-            if block == "data":
-                for source in sources:
-                    boot_indices = sources[source]
-                    source_block_mask = masks[block] & (df["source"] == source)
-
-                    orig_indices = df_updated.loc[source_block_mask].index
-                    new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
-                    assert len(orig_indices) == len(
-                        new_scores
-                    ), "Mismatch in number of rows for data block"
-                    df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
-            else:
-                boot_indices = sources
-                orig_indices = df_updated.loc[masks[block]].index
-                new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
-                assert len(orig_indices) == len(
-                    new_scores
-                ), "Mismatch in number of rows for market block"
-                df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
+            orig_indices = df_updated.loc[masks[block]].index
+            new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
+            assert len(orig_indices) == len(
+                new_scores
+            ), "Mismatch in number of rows for market block"
+            df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
 
         return df_updated
 
@@ -967,13 +977,14 @@ def bootstrap_BSS_CI(df):
 
     fig, ax = plt.subplots(figsize=(10, 4))
 
-    model_to_plot = "O1-Preview-2024-09-12 (zero shot)"
+    model_to_plot = "Superforecaster median forecast"
+    # "Claude-3-7-Sonnet-20250219 (scratchpad with freeze values)"
+    # "O1-Preview-2024-09-12 (zero shot)"
     first_print = True
     bootstrap_colors = plt.cm.Blues(np.linspace(0.3, 0.7, 9000))  # optional: fade blues
 
     for _ in range(n_replications):
         print(f"Replication {_}")
-        leaderboard = []
 
         # Duplicate df with sampled scores for all models
         df_tmp = df.copy()
@@ -981,11 +992,14 @@ def bootstrap_BSS_CI(df):
         # Drop combination of naive forecasters
         # These should be recreated from the resampled individual naive forecasters
         df_tmp = df_tmp[
-            ~(mask_naive_forecaster & df_tmp["question_set"].apply(lambda x: isinstance(x, tuple)))
+            ~(
+                mask_naive_forecaster_df
+                & df_tmp["question_set"].apply(lambda x: isinstance(x, tuple))
+            )
         ].reset_index(drop=True)
 
+        leaderboard = []
         sample_indices = {}
-
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
             if row["model"] == model_to_plot and first_print:
@@ -1011,13 +1025,9 @@ def bootstrap_BSS_CI(df):
             ]
 
         df_leaderboard = pd.DataFrame(leaderboard)
+        mask_naive_forecaster_df_leaderboard = get_naive_forecaster_mask(df_leaderboard)
         df_naive_forecaster = (
-            df_leaderboard[
-                (df_leaderboard["organization"] == BASELINE_ORG_MODEL["organization"])
-                & (df_leaderboard["model"] == BASELINE_ORG_MODEL["model"])
-            ]
-            .copy()
-            .reset_index(drop=True)
+            df_leaderboard[mask_naive_forecaster_df_leaderboard].copy().reset_index(drop=True)
         )
         leaderboard += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
 
@@ -1031,8 +1041,8 @@ def bootstrap_BSS_CI(df):
             bss_value = row["BSS_wrt_naive_mean"]
             bootstrap_results.setdefault(key, []).append(bss_value)
 
-    plt.tight_layout()
-    plt.show()
+    # plt.tight_layout()
+    # plt.show()
 
     ci_results = {}
     for key, bss_values in bootstrap_results.items():
@@ -1050,8 +1060,8 @@ def bootstrap_BSS_CI(df):
 
     df["bootstrap_BSS_CI"] = df.apply(assign_ci, axis=1)
 
-    # Remove extra naive forecaster
-    df_subset = df[mask_naive_forecaster].copy()
+    # Remove extra naive forecasters
+    df_subset = df[mask_naive_forecaster_df].copy()
     df_subset["tuple_length"] = df_subset["forecast_due_date"].apply(
         lambda x: len(x) if isinstance(x, (list, tuple)) else 0
     )
@@ -1148,22 +1158,23 @@ def driver(_):
     human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
     # files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    # files = [file for file in files if file.endswith(".json")]
+    # files = [file for file in files if file.endswith(".json")]  # and file.startswith("2024-07-21")]
+    # pprint(files)
     files = [
-        # "2024-07-21/2024-07-21.ForecastBench.always-0.5.json",
         "2024-07-21/2024-07-21.ForecastBench.always-0.json",
-        # "2024-07-21/2024-07-21.ForecastBench.always-1.json",
-        # "2024-07-21/2024-07-21.ForecastBench.human_public.json",
-        # "2024-07-21/2024-07-21.ForecastBench.human_super.json",
-        # "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
+        "2024-07-21/2024-07-21.ForecastBench.always-1.json",
+        "2024-07-21/2024-07-21.ForecastBench.human_public.json",
+        "2024-07-21/2024-07-21.ForecastBench.human_super.json",
+        "2024-07-21/2024-07-21.ForecastBench.imputed-forecaster.json",
         "2024-07-21/2024-07-21.ForecastBench.naive-forecaster.json",
-        # '2024-07-21/2024-07-21.ForecastBench.random-uniform.json',
         "2024-07-21/2024-07-21.Anthropic.claude_3p5_sonnet_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.OpenAI.gpt_4_turbo_0409_scratchpad_with_freeze_values.json",
-        # "2024-07-21/2024-07-21.Qwen.qwen_1p5_110b_scratchpad.json",
         "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
         "2025-03-02/2025-03-02.ForecastBench.always-0.json",
-        "2025-03-02/2025-03-02.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+        "2025-03-16/2025-03-16.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
+        "2025-03-16/2025-03-16.ForecastBench.naive-forecaster.json",
+        "2025-03-16/2025-03-16.ForecastBench.always-0.json",
+        "2025-03-16/2025-03-16.ForecastBench.naive-forecaster.json",
+        "2025-03-16/2025-03-16.DeepSeek.DeepSeek-R1_scratchpad_with_freeze_values.json",
     ]
 
     with ThreadPoolExecutor() as executor:

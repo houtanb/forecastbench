@@ -13,7 +13,6 @@ from pprint import pprint
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 from scipy.stats import norm
 from termcolor import colored
 from tqdm import tqdm
@@ -66,6 +65,7 @@ def download_and_read_processed_forecast_file(filename):
 
 
 def get_masks(df):
+    """Return the data and market masks for the given dataframe."""
     masks = {}
 
     resolved_mask = df["resolved"].astype(bool)
@@ -93,10 +93,10 @@ def get_masks(df):
 
 
 def get_naive_forecaster_mask(df):
+    """Return the mask associated with the naive forecaster."""
     return (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
         df["model"] == BASELINE_ORG_MODEL["model"]
     )
-
 
 
 def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
@@ -138,9 +138,7 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
     )
 
     # % imputed
-    pct_imputed = int(
-        np.round(df[(data_mask & resolved_mask) | market_mask]["imputed"].mean() * 100)
-    )
+    pct_imputed = int(np.round(df[masks["data"] | masks["market"]]["imputed"].mean() * 100))
 
     return {
         "data": data_resolved_score,
@@ -179,9 +177,52 @@ def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, questi
     #     leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
-def add_to_llm_leaderboard(*args, **kwargs):
-    """Wrap `add_to_leaderboard` for easy reading of driver."""
-    add_to_leaderboard(*args, **kwargs)
+def has_too_many_imputed(df, org_and_model) -> bool:
+    """Determine whether or not to include this model.
+
+    * Don't include models with more than D percent imputed data questions and M percent imputed
+      market questions.
+    * Always include ForecastBench models
+    """
+    if org_and_model["organization"] == constants.BENCHMARK_NAME:
+        return False
+
+    MIN_MARKET_RESOLVED = 10
+    MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
+    masks = get_masks(df)
+    df_data = df[masks["data"]]
+    df_market = df[masks["market"]]
+    df_market_resolved = df[masks["market_resolved"]]
+
+    if len(df_market_resolved) < MIN_MARKET_RESOLVED or (
+        df_data["imputed"].mean() > MIN_DATA_MISSING_PCT
+        or df_market["imputed"].mean() > MIN_MARKET_MISSING_PCT
+    ):
+        logger.info(f"DROPPING {org_and_model}")
+        logger.info(f" * % imputed data: {round(df_data['imputed'].mean() * 100, 2)}")
+        logger.info(f" * % imputed market: {round(df_market['imputed'].mean() * 100, 2)}")
+        logger.info(f" * N market resolved:: {len(df_market_resolved)}")
+        return True
+    return False
+
+
+def add_to_llm_leaderboard(
+    leaderboard, org_and_model, df, forecast_due_date, question_set_filename
+):
+    """Create the LLM leaderbeard.
+
+    * Remove combination questions before including in the LLM leaderboard
+    """
+    df_no_combos = df[df["direction"] == ()].reset_index(drop=True)
+
+    if not has_too_many_imputed(df_no_combos, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_no_combos,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
 
 
 def download_question_set_save_in_cache(forecast_due_date, cache):
@@ -199,7 +240,7 @@ def download_question_set_save_in_cache(forecast_due_date, cache):
             )
 
 
-def add_to_llm_and_human_leaderboard(
+def add_to_human_leaderboard(
     leaderboard, org_and_model, df, forecast_due_date, cache, question_set_filename
 ):
     """Parse the forecasts to include only those questions that were in the human question set."""
@@ -210,13 +251,14 @@ def add_to_llm_and_human_leaderboard(
         df_human_question_set[["id", "source"]],
         on=["id", "source"],
     ).reset_index(drop=True)
-    add_to_leaderboard(
-        leaderboard=leaderboard,
-        org_and_model=org_and_model,
-        df=df_only_human_question_set,
-        forecast_due_date=forecast_due_date,
-        question_set_filename=question_set_filename,
-    )
+    if not has_too_many_imputed(df_only_human_question_set, org_and_model):
+        add_to_leaderboard(
+            leaderboard=leaderboard,
+            org_and_model=org_and_model,
+            df=df_only_human_question_set,
+            forecast_due_date=forecast_due_date,
+            question_set_filename=question_set_filename,
+        )
 
 
 def add_to_llm_and_human_combo_leaderboards(
@@ -782,9 +824,7 @@ def create_naive_forecaster_leaderboard_entries(df_naive_forecaster):
 
 def merge_duplicates(df):
     """Merge the duplicated entries into one entry."""
-    naive_forecaster_mask = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
-        df["model"] == BASELINE_ORG_MODEL["model"]
-    )
+    naive_forecaster_mask = get_naive_forecaster_mask(df)
     df_naive_forecaster = df[naive_forecaster_mask].reset_index(drop=True)
     df = df[~naive_forecaster_mask].reset_index(drop=True)
 
@@ -844,9 +884,7 @@ def merge_common_models(df):
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
     n_replications = 3
-    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
-        df["model"] == BASELINE_ORG_MODEL["model"]
-    )
+    mask_naive_forecaster = get_naive_forecaster_mask(df)
     bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
 
@@ -879,10 +917,12 @@ def bootstrap_BSS_CI(df):
         sampled_indices = {}
         sampled_indices["data"] = sample_block_indices_by_source(df, masks["data"])
         sampled_indices["market_resolved"] = sample_block_indices_no_source(
-            df, masks["market_resolved"],
+            df,
+            masks["market_resolved"],
         )
         sampled_indices["market_unresolved"] = sample_block_indices_no_source(
-            df, masks["market_unresolved"],
+            df,
+            masks["market_unresolved"],
         )
         sample_indices[forecast_due_date] = sampled_indices
 
@@ -923,12 +963,11 @@ def bootstrap_BSS_CI(df):
 
         return df_updated
 
-
     import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots(figsize=(10, 4))
 
     model_to_plot = "O1-Preview-2024-09-12 (zero shot)"
-    i=0
     first_print = True
     bootstrap_colors = plt.cm.Blues(np.linspace(0.3, 0.7, 9000))  # optional: fade blues
 
@@ -949,14 +988,19 @@ def bootstrap_BSS_CI(df):
 
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
-            if row["model"]==model_to_plot and first_print:
-                ax.plot(df_model["score"].values, color='black', label='Original', linewidth=2)
-                first_print=False
+            if row["model"] == model_to_plot and first_print:
+                ax.plot(df_model["score"].values, color="black", label="Original", linewidth=2)
+                first_print = False
 
             indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
             df_model = apply_sample_indices(df_model, indices)
-            if row["model"]==model_to_plot:
-                ax.plot(df_model["score"].values, color=bootstrap_colors[n_replications], alpha=0.4, label=None)
+            if row["model"] == model_to_plot:
+                ax.plot(
+                    df_model["score"].values,
+                    color=bootstrap_colors[n_replications],
+                    alpha=0.4,
+                    label=None,
+                )
 
             leaderboard += [
                 {
@@ -965,7 +1009,6 @@ def bootstrap_BSS_CI(df):
                 }
                 | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
             ]
-
 
         df_leaderboard = pd.DataFrame(leaderboard)
         df_naive_forecaster = (
@@ -987,7 +1030,6 @@ def bootstrap_BSS_CI(df):
             key = (row["organization"], row["model"])
             bss_value = row["BSS_wrt_naive_mean"]
             bootstrap_results.setdefault(key, []).append(bss_value)
-
 
     plt.tight_layout()
     plt.show()
@@ -1074,7 +1116,7 @@ def make_leaderboard(leaderboard, title, basename):
     df = pd.DataFrame(leaderboard)
     df = merge_common_models(df)
     df = bootstrap_BSS_CI(df)
-    df = impute_BSS_CI(df)
+    # df = impute_BSS_CI(df)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -1103,7 +1145,7 @@ def driver(_):
     """Create new leaderboard."""
     cache = {}
     llm_leaderboard = {}
-    llm_and_human_leaderboard = {}
+    human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
     # files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     # files = [file for file in files if file.endswith(".json")]
@@ -1137,13 +1179,11 @@ def driver(_):
         )
         executor.shutdown(wait=True)
 
-    # dfs = {k:v for d in dfs for k,v in d.items()}
     logger.info(f"Have access to {env.NUM_CPUS} CPU.")
     for d in dfs:
         f, data = next(iter(d.items()))
         logger.info(f"Scoring forecasts in `{f}`...")
 
-        # data = download_and_read_processed_forecast_file(filename=f)
         if not data or not isinstance(data, dict):
             logger.warning(f"Problem processing {f}. First `continue`.")
             continue
@@ -1188,7 +1228,7 @@ def driver(_):
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
-        pprint(org_and_model)
+
         if not is_human_forecast_set:
             add_to_llm_leaderboard(
                 llm_leaderboard,
@@ -1197,8 +1237,8 @@ def driver(_):
                 forecast_due_date,
                 question_set_filename=question_set_filename,
             )
-        add_to_llm_and_human_leaderboard(
-            llm_and_human_leaderboard,
+        add_to_human_leaderboard(
+            human_leaderboard,
             org_and_model,
             df,
             forecast_due_date,
@@ -1224,32 +1264,32 @@ def driver(_):
         #     "basename": "leaderboard_overall",
         # },
         # {
-        #     "leaderboard": llm_and_human_leaderboard["overall"],
+        #     "leaderboard": human_leaderboard["overall"],
         #     "title": f"Human {title}",
         #     "basename": "human_leaderboard_overall_high_level",
         # },
         {
-            "leaderboard": llm_and_human_leaderboard["overall"],
+            "leaderboard": human_leaderboard["overall"],
             "title": f"Human {title}",
             "basename": "human_leaderboard_overall",
         },
         # {
-        #     "d": llm_and_human_leaderboard["7"],
+        #     "d": human_leaderboard["7"],
         #     "title": f"Human {title} 7 day",
         #     "basename": "human_leaderboard_overall_7",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["30"],
+        #     "d": human_leaderboard["30"],
         #     "title": f"Human {title} 30 day",
         #     "basename": "human_leaderboard_overall_30",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["90"],
+        #     "d": human_leaderboard["90"],
         #     "title": f"Human {title} 90 day",
         #     "basename": "human_leaderboard_overall_90",
         # },
         # {
-        #     "d": llm_and_human_leaderboard["180"],
+        #     "d": human_leaderboard["180"],
         #     "title": f"Human {title} 180 day",
         #     "basename": "human_leaderboard_overall_180",
         # },

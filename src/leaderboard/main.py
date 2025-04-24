@@ -888,15 +888,19 @@ def bootstrap_BSS_CI(df):
     bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
 
-    def sample_block_indices_by_source(df, mask):
+    def sample_block_indices_by_source_by_horizon(df, mask):
         """Sample everything where mask is true, source by source."""
         sampled_indices = []
         for source in df[mask]["source"].unique():
             source_mask = mask & (df["source"] == source)
-            available_indices = df.loc[source_mask].index.to_numpy()
-            sampled_indices.append(
-                np.random.choice(available_indices, size=len(available_indices), replace=True)
-            )
+            for resolution_date in df[source_mask]["resolution_date"].unique():
+                source_horizon_mask = source_mask & (df["resolution_date"] == resolution_date)
+                available_indices = df.loc[source_horizon_mask].index.to_numpy()
+                if len(available_indices) == 0:
+                    raise ValueError("Available indices should not be empty.")
+                sampled_indices.append(
+                    np.random.choice(available_indices, size=len(available_indices), replace=True)
+                )
         return np.concatenate(sampled_indices)
 
     def sample_block_indices_no_source(df, mask):
@@ -939,7 +943,7 @@ def bootstrap_BSS_CI(df):
             masks = get_masks(df)
 
             indices = {}
-            indices["data"] = sample_block_indices_by_source(df, masks["data"])
+            indices["data"] = sample_block_indices_by_source_by_horizon(df, masks["data"])
             indices["market_resolved"] = sample_block_indices_no_source(
                 df,
                 masks["market_resolved"],
@@ -973,16 +977,6 @@ def bootstrap_BSS_CI(df):
 
         return df_updated
 
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-
-    model_to_plot = "Superforecaster median forecast"
-    # "Claude-3-7-Sonnet-20250219 (scratchpad with freeze values)"
-    # "O1-Preview-2024-09-12 (zero shot)"
-    first_print = True
-    bootstrap_colors = plt.cm.Blues(np.linspace(0.3, 0.7, 9000))  # optional: fade blues
-
     for _ in range(n_replications):
         print(f"Replication {_}")
 
@@ -1002,19 +996,9 @@ def bootstrap_BSS_CI(df):
         sample_indices = {}
         for _, row in df_tmp.iterrows():
             df_model = row["df"].copy()
-            if row["model"] == model_to_plot and first_print:
-                ax.plot(df_model["score"].values, color="black", label="Original", linewidth=2)
-                first_print = False
 
             indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
             df_model = apply_sample_indices(df_model, indices)
-            if row["model"] == model_to_plot:
-                ax.plot(
-                    df_model["score"].values,
-                    color=bootstrap_colors[n_replications],
-                    alpha=0.4,
-                    label=None,
-                )
 
             leaderboard += [
                 {
@@ -1041,14 +1025,10 @@ def bootstrap_BSS_CI(df):
             bss_value = row["BSS_wrt_naive_mean"]
             bootstrap_results.setdefault(key, []).append(bss_value)
 
-    # plt.tight_layout()
-    # plt.show()
-
     ci_results = {}
+    alpha = (1 - CONFIDENCE_LEVEL) / 2
     for key, bss_values in bootstrap_results.items():
-        alpha = (1 - CONFIDENCE_LEVEL) / 2
-        lower = np.percentile(bss_values, alpha * 100)
-        upper = np.percentile(bss_values, (1 - alpha) * 100)
+        lower, upper = np.percentile(a=bss_values, q=[alpha * 100, (1 - alpha) * 100])
         ci_results[key] = (lower, upper)
 
     def assign_ci(row):
@@ -1157,10 +1137,10 @@ def driver(_):
     llm_leaderboard = {}
     human_leaderboard = {}
     # llm_and_human_combo_leaderboard = {}
-    # files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    # files = [file for file in files if file.endswith(".json")]  # and file.startswith("2024-07-21")]
+    files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
+    files = [file for file in files if file.endswith(".json")]  # and file.startswith("2024-07-21")]
     # pprint(files)
-    files = [
+    files1 = [
         "2024-07-21/2024-07-21.ForecastBench.always-0.json",
         "2024-07-21/2024-07-21.ForecastBench.always-1.json",
         "2024-07-21/2024-07-21.ForecastBench.human_public.json",
@@ -1171,7 +1151,6 @@ def driver(_):
         "2025-03-02/2025-03-02.ForecastBench.naive-forecaster.json",
         "2025-03-02/2025-03-02.ForecastBench.always-0.json",
         "2025-03-16/2025-03-16.Anthropic.claude-3-5-sonnet-20240620_scratchpad_with_freeze_values.json",
-        "2025-03-16/2025-03-16.ForecastBench.naive-forecaster.json",
         "2025-03-16/2025-03-16.ForecastBench.always-0.json",
         "2025-03-16/2025-03-16.ForecastBench.naive-forecaster.json",
         "2025-03-16/2025-03-16.DeepSeek.DeepSeek-R1_scratchpad_with_freeze_values.json",

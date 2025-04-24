@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 import tempfile
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from multiprocessing import Pool
@@ -153,6 +152,7 @@ def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
         "overall_resolved": overall_resolved_score,
         "n_overall_resolved": n_overall_resolved,
         "overall": overall_score,
+        "overall_std_dev": overall_std_dev,
         "n_overall": n_overall,
         "pct_imputed": pct_imputed,
         "df": df.copy(),
@@ -187,7 +187,7 @@ def has_too_many_imputed(df, org_and_model) -> bool:
     if org_and_model["organization"] == constants.BENCHMARK_NAME:
         return False
 
-    MIN_MARKET_RESOLVED = 9
+    MIN_MARKET_RESOLVED = 5
     MIN_DATA_MISSING_PCT = MIN_MARKET_MISSING_PCT = 0.05
     masks = get_masks(df)
     df_data = df[masks["data"]]
@@ -854,7 +854,6 @@ def merge_duplicates(df):
 def merge_common_models(df):
     """Merge common models for a given leaderboard."""
     df = get_BSS(df)
-    return df
     df_duplicated = (
         df[
             df.duplicated(
@@ -884,10 +883,9 @@ def merge_common_models(df):
 
 def bootstrap_BSS_CI(df):
     """Bootstrap the confidence interval for the BSS."""
-    n_replications = 1000
+    n_replications = 100
     mask_naive_forecaster_df = get_naive_forecaster_mask(df)
-    # bootstrap_results = {}
-    bootstrap_results = defaultdict(list)
+    bootstrap_results = {}
     df["bootstrap_BSS_CI"] = None
 
     def sample_block_indices_by_source_by_horizon(df, mask):
@@ -979,14 +977,8 @@ def bootstrap_BSS_CI(df):
 
         return df_updated
 
-    round_ids = df["forecast_due_date"].unique()
     for _ in range(n_replications):
         print(f"Replication {_}")
-        chosen_rounds = np.random.choice(
-            round_ids,
-            size=len(round_ids),
-            replace=True,
-        )
 
         # Duplicate df with sampled scores for all models
         df_tmp = df.copy()
@@ -1002,92 +994,51 @@ def bootstrap_BSS_CI(df):
 
         leaderboard = []
         sample_indices = {}
-        for rnd in chosen_rounds:
-            mask_naive_forecaster_df_rnd = get_naive_forecaster_mask(df_tmp)
-            df_tmp = df_tmp[(df_tmp["forecast_due_date"] == rnd) | mask_naive_forecaster_df_rnd]
-            for _, row in df_tmp.iterrows():
-                df_model = row["df"].copy()
+        for _, row in df_tmp.iterrows():
+            df_model = row["df"].copy()
 
-                indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
-                df_model = apply_sample_indices(df_model, indices)
+            indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
+            df_model = apply_sample_indices(df_model, indices)
 
-                leaderboard += [
-                    {
-                        "organization": row["organization"],
-                        "model": row["model"],
-                    }
-                    | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
-                ]
+            leaderboard += [
+                {
+                    "organization": row["organization"],
+                    "model": row["model"],
+                }
+                | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
+            ]
 
         df_leaderboard = pd.DataFrame(leaderboard)
-
-        # ---- aggregate to one BSS per model (option B) ----
-        mask_naive = get_naive_forecaster_mask(df_leaderboard)
-        base_by_round = (
-            df_leaderboard[mask_naive].set_index("forecast_due_date")["overall"].to_dict()
+        mask_naive_forecaster_df_leaderboard = get_naive_forecaster_mask(df_leaderboard)
+        df_naive_forecaster = (
+            df_leaderboard[mask_naive_forecaster_df_leaderboard].copy().reset_index(drop=True)
         )
-        agg = defaultdict(lambda: {"bs_model": 0.0, "bs_base": 0.0})
+        leaderboard += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
 
-        for _, r in df_leaderboard[~mask_naive].iterrows():
-            n_q = r["n_overall"]
-            key = (r["organization"], r["model"])
-            agg[key]["bs_model"] += r["overall"] * n_q
-            agg[key]["bs_base"] += base_by_round[r["forecast_due_date"]] * n_q
+        # Redo this to create the complete, resampled leaderboard
+        df_leaderboard = pd.DataFrame(leaderboard)
 
-        for key, sums in agg.items():
-            bss_value = 1 - sums["bs_model"] / sums["bs_base"]
-            bootstrap_results[key].append(bss_value)
+        # Get BSS with the leaderboard, updated with the combined naive forecasters
+        df_leaderboard = get_BSS(df=df_leaderboard)
+        for _, row in df_leaderboard.iterrows():
+            key = (row["organization"], row["model"])
+            bss_value = row["BSS_wrt_naive_mean"]
+            bootstrap_results.setdefault(key, []).append(bss_value)
 
-        # mask_naive_forecaster_df_leaderboard = get_naive_forecaster_mask(df_leaderboard)
-        # df_naive_forecaster = (
-        #     df_leaderboard[mask_naive_forecaster_df_leaderboard].copy().reset_index(drop=True)
-        # )
-        # print(df_naive_forecaster)
-        # leaderboard += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
-
-        # # Redo this to create the complete, resampled leaderboard
-        # df_leaderboard = pd.DataFrame(leaderboard)
-
-        # # Get BSS with the leaderboard, updated with the combined naive forecasters
-        # df_leaderboard = get_BSS(df=df_leaderboard)
-        # for _, row in df_leaderboard.iterrows():
-        #     key = (row["organization"], row["model"])
-        #     bss_value = row["BSS_wrt_naive_mean"]
-        #     bootstrap_results.setdefault(key, []).append(bss_value)
-
-    # -------- confidence intervals --------
     ci_results = {}
     alpha = (1 - CONFIDENCE_LEVEL) / 2
-    for key, vals in bootstrap_results.items():
-        lower, upper = np.percentile(vals, [alpha * 100, (1 - alpha) * 100])
+    for key, bss_values in bootstrap_results.items():
+        lower, upper = np.percentile(a=bss_values, q=[alpha * 100, (1 - alpha) * 100])
         ci_results[key] = (lower, upper)
 
-    df["bootstrap_BSS_CI"] = df.apply(
-        lambda row: (
-            [
-                round(x, LEADERBOARD_DECIMAL_PLACES)
-                for x in ci_results.get((row["organization"], row["model"]), [])
-            ]
-            if (row["organization"], row["model"]) in ci_results
-            else None
-        ),
-        axis=1,
-    )
+    def assign_ci(row):
+        key = (row["organization"], row["model"])
+        ci = ci_results.get(key, None)
+        if ci is not None:
+            return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+        return None
 
-    # ci_results = {}
-    # alpha = (1 - CONFIDENCE_LEVEL) / 2
-    # for key, bss_values in bootstrap_results.items():
-    #     lower, upper = np.percentile(a=bss_values, q=[alpha * 100, (1 - alpha) * 100])
-    #     ci_results[key] = (lower, upper)
-
-    # def assign_ci(row):
-    #     key = (row["organization"], row["model"])
-    #     ci = ci_results.get(key, None)
-    #     if ci is not None:
-    #         return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
-    #     return None
-
-    # df["bootstrap_BSS_CI"] = df.apply(assign_ci, axis=1)
+    df["bootstrap_BSS_CI"] = df.apply(assign_ci, axis=1)
 
     # Remove extra naive forecasters
     df_subset = df[mask_naive_forecaster_df].copy()

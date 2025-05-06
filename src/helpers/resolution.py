@@ -95,6 +95,57 @@ def is_combo_question_resolved(is_resolved0, is_resolved1, dir0, dir1, resolved_
     )
 
 
+def get_combo_question_resolution_date(
+    is_resolved0,
+    is_resolved1,
+    dir0,
+    dir1,
+    resolved_to0,
+    resolved_to1,
+    resolution_date0,
+    resolution_date1,
+):
+    """Determine when a combo forecast question is resolved based on two sub-questions."""
+    if is_resolved0 and is_resolved1:
+        return max(resolution_date0, resolution_date1)
+
+    zero_resolved = _is_combo_question_resolved_helper(
+        is_resolved=is_resolved0,
+        direction=dir0,
+        resolved_to=resolved_to0,
+    )
+    one_resolved = _is_combo_question_resolved_helper(
+        is_resolved=is_resolved1,
+        direction=dir1,
+        resolved_to=resolved_to1,
+    )
+
+    if np.isnan(resolved_to0) and np.isnan(resolved_to1):
+        return min(resolution_date0, resolution_date1)
+    elif np.isnan(resolved_to0):
+        if one_resolved:
+            return min(resolution_date0, resolution_date1)
+        else:
+            return resolution_date0
+    elif np.isnan(resolved_to1):
+        if zero_resolved:
+            return min(resolution_date0, resolution_date1)
+        else:
+            return resolution_date1
+
+    if bool(zero_resolved and one_resolved):
+        return max(resolution_date0, resolution_date1)
+    elif zero_resolved:
+        return resolution_date0
+    elif one_resolved:
+        return resolution_date1
+
+    # Arriing here means that the combo has not resolved:
+    if resolution_date0 != resolution_date1:
+        raise ValueError(f"Should not arrive here. {resolution_date0} {resolution_date1}")
+    raise resolution_date0
+
+
 def combo_change_sign(value: Union[bool, int, float], sign: int):
     """Change direction of bool value given sign (-1 or 1)."""
     if sign not in (1, -1):

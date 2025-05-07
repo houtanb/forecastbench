@@ -140,10 +140,12 @@ def get_combo_question_resolution_date(
     elif one_resolved:
         return resolution_date1
 
-    # Arriing here means that the combo has not resolved:
     if resolution_date0 != resolution_date1:
-        raise ValueError(f"Should not arrive here. {resolution_date0} {resolution_date1}")
-    raise resolution_date0
+        # The combo has not resolved even though one question has
+        return max(resolution_date0, resolution_date1)
+
+    # Neither has resolved
+    return resolution_date0
 
 
 def combo_change_sign(value: Union[bool, int, float], sign: int):

@@ -1,9 +1,9 @@
 """Create leaderboard."""
 
+import itertools
 import json
 import logging
 import os
-import pickle
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -13,15 +13,18 @@ from pprint import pprint
 
 import numpy as np
 import pandas as pd
-import statsmodels.formula.api as smf
+from scipy.stats import norm
 from termcolor import colored
 from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
 from helpers import (  # noqa: E402
     constants,
     decorator,
     env,
+    git,
+    keys,
     question_curation,
     resolution,
 )
@@ -33,7 +36,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 LEADERBOARD_UPDATED_DATE_STR = "Updated " + datetime.now().strftime("%b. %d, %Y")
-BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecast"}
+BASELINE_ORG_MODEL = {"organization": constants.BENCHMARK_NAME, "model": "Naive Forecaster"}
 SUPERFORECASTER_MODEL = {
     "organization": constants.BENCHMARK_NAME,
     "model": "Superforecaster median forecast",
@@ -46,31 +49,19 @@ LEADERBOARD_DECIMAL_PLACES = 3
 
 def download_and_read_processed_forecast_file(filename):
     """Download forecast file."""
-    with tempfile.NamedTemporaryFile(dir="/tmp", delete=True) as tmp:
-        gcp.storage.download(
-            bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
-            filename=filename,
-            local_filename=tmp.name,
-        )
-        with open(tmp.name, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    with tempfile.NamedTemporaryFile(dir="/tmp/", delete=False) as tmp:
+        local_filename = tmp.name
 
+    gcp.storage.download(
+        bucket_name=env.PROCESSED_FORECAST_SETS_BUCKET,
+        filename=filename,
+        local_filename=local_filename,
+    )
+    with open(local_filename, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    os.remove(local_filename)
     return {filename: data}
-
-
-def download_question_set_save_in_cache(forecast_due_date, cache):
-    """Time-saving function to only download files once per run.
-
-    Save question files in cache.
-    """
-    cache.setdefault(forecast_due_date, {})
-
-    for human_or_llm in ["human", "llm"]:
-        if human_or_llm not in cache[forecast_due_date]:
-            filename = f"{forecast_due_date}-{human_or_llm}.json"
-            cache[forecast_due_date][human_or_llm] = resolution.download_and_read_question_set_file(
-                filename=filename
-            )
 
 
 def get_masks(df):
@@ -84,26 +75,54 @@ def get_masks(df):
     return masks
 
 
-def get_df_info(df):
-    """Provide information about the forecasts."""
-    masks = get_masks(df)
+def get_naive_forecaster_mask(df):
+    """Return the mask associated with the naive forecaster."""
+    return (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+
+
+def get_leaderboard_entry(df, forecast_due_date, question_set_filename):
+    """Create the leaderboard entry for the given dataframe."""
+    # Masks
+    data_mask = df["source"].isin(question_curation.DATA_SOURCES)
+
+    resolved_mask = df["resolved"].astype(bool)
+
+    def get_scores(df, mask):
+        scores = df[mask]["score"]
+        return scores.mean(), len(scores)
+
+    # Datasets
+    data_resolved_score, n_data_resolved = get_scores(df, data_mask & resolved_mask)
+
+    # % imputed
+    pct_imputed = int(np.round(df[data_mask & resolved_mask]["imputed"].mean() * 100))
+
     return {
-        "n_data": len(df[masks["data"]]),
-        "pct_imputed_data": df[masks["data"]]["imputed"].sum() / len(df[masks["data"]]) * 100,
+        "data": data_resolved_score,
+        "n_data": n_data_resolved,
+        "pct_imputed": pct_imputed,
+        "forecast_due_date": forecast_due_date,
+        "question_set": question_set_filename,
+        "df": df.copy(),
     }
 
 
 def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date, question_set_filename):
     """Add scores to the leaderboard."""
-    leaderboard.setdefault("overall", [])
-    leaderboard["overall"].append(
-        org_and_model | {"forecast_due_date": forecast_due_date, "df": df.copy()} | get_df_info(df)
-    )
-
-
-def add_to_llm_leaderboard_include_combos(*args, **kwargs):
-    """Wrap `add_to_leaderboard` for easy reading of driver."""
-    add_to_leaderboard(*args, **kwargs)
+    leaderboard_entry = [
+        org_and_model | get_leaderboard_entry(df, forecast_due_date, question_set_filename)
+    ]
+    leaderboard["overall"] = leaderboard.get("overall", []) + leaderboard_entry
+    # for horizon in df["horizon"].unique():
+    #     leaderboard_entry = [
+    #         org_and_model
+    #         | get_leaderboard_entry(
+    #             df[df["horizon"] == horizon].copy(), forecast_due_date, question_set_filename
+    #         )
+    #     ]
+    #     leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
 def add_to_llm_leaderboard(
@@ -124,16 +143,37 @@ def add_to_llm_leaderboard(
     )
 
 
+def download_question_set_save_in_cache(forecast_due_date, cache):
+    """Time-saving function to only download files once per run.
+
+    Save question files in cache.
+    """
+    if forecast_due_date not in cache:
+        cache[forecast_due_date] = {}
+
+    for human_or_llm in ["human", "llm"]:
+        if human_or_llm not in cache[forecast_due_date]:
+            cache[forecast_due_date][human_or_llm] = resolution.download_and_read_question_set_file(
+                filename=f"{forecast_due_date}-{human_or_llm}.json"
+            )
+
+
 def add_to_human_leaderboard(
     leaderboard, org_and_model, df, forecast_due_date, cache, question_set_filename
 ):
     """Parse the forecasts to include only those questions that were in the human question set."""
-    df_no_combos = df[df["direction"] == ()].reset_index(drop=True)
+    download_question_set_save_in_cache(forecast_due_date, cache)
+    df_human_question_set = cache[forecast_due_date]["human"].copy()
+    df_only_human_question_set = pd.merge(
+        df,
+        df_human_question_set[["id", "source"]],
+        on=["id", "source"],
+    ).reset_index(drop=True)
 
     add_to_leaderboard(
         leaderboard=leaderboard,
         org_and_model=org_and_model,
-        df=df_no_combos,
+        df=df_only_human_question_set,
         forecast_due_date=forecast_due_date,
         question_set_filename=question_set_filename,
     )
@@ -143,43 +183,111 @@ def make_and_upload_html_table(df, title, basename):
     """Make and upload HTLM leaderboard."""
     # Replace NaN with empty strings for display
     logger.info(f"Making HTML leaderboard file: {title} {basename}.")
-    df = df.fillna("")
+    df = df.fillna("--")
 
     # Add ranking
-    df = df.sort_values(by=["adj_brier_dataset"], ignore_index=True)
+    df = df.sort_values(
+        by=[
+            "BSS_wrt_naive_mean",
+            "n_data",
+            "data",
+        ],
+        ascending=[
+            False,
+            False,
+            True,
+        ],
+        ignore_index=True,
+    )
+
+    # Round columns to 3 decimal places
+    numeric_cols = df.select_dtypes(include="number").columns
+    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
+
+    # Insert ranking
     df.insert(loc=0, column="Ranking", value="")
-    print(sorted(df.columns))
-    df["score_diff"] = df["adj_brier_dataset"] - df["adj_brier_dataset"].shift(1)
+    df["score_diff"] = df["BSS_wrt_naive_mean"] - df["BSS_wrt_naive_mean"].shift(1)
     for index, row in df.iterrows():
         if row["score_diff"] != 0:
             prev_rank = index + 1
         df.loc[index, "Ranking"] = prev_rank
     df.drop(columns="score_diff", inplace=True)
 
-    # Round columns to 3 decimal places
-    numeric_cols = df.select_dtypes(include="number").columns
-    df[numeric_cols] = df[numeric_cols].round(3)
+    df["pct_imputed"] = df["pct_imputed"].round(0).astype(int).astype(str) + "%"
+    # df["pct_better_than_no1"] = df["pct_better_than_no1"].round(0).astype(int).astype(str) + "%"
 
-    for col in [
-        "n_adj_brier_dataset",
-    ]:
-        df[col] = df[col].astype(int)
+    # def get_p_value_display(p):
+    #     if not isinstance(p, (float, int)):
+    #         return str(p)
+    #     if p < 0.001:
+    #         return "<0.001"
+    #     if p < 0.01:
+    #         return "<0.01"
+    #     if p < 0.05:
+    #         return "<0.05"
+    #     return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
+    #
+    # df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
+
+    def link_question_set(question_set):
+        return (
+            '<a href="https://github.com/forecastingresearch/forecastbench-datasets/'
+            + "blob/main/datasets/question_sets/"
+            + question_set
+            + '">'
+            + question_set
+            + "</a>"
+        )
+
+    def link_question_sets(question_sets):
+        if isinstance(question_sets, str):
+            return link_question_set(question_sets)
+        if isinstance(question_sets, tuple):
+            retval = link_question_set(question_sets[0]) + ", "
+            if len(question_sets) > 2:
+                retval += "..., "
+            return retval + link_question_set(question_sets[-1])
+        raise ValueError("wrong type for question set")
+
+    df["question_set"] = df["question_set"].apply(link_question_sets)
+
+    def format_score(score_series, count_series):
+        def safe_format_score(x):
+            try:
+                return f"{float(x):.{LEADERBOARD_DECIMAL_PLACES}f}"
+            except (ValueError, TypeError):
+                return str(x)
+
+        formatted_scores = score_series.apply(safe_format_score)
+        formatted_counts = count_series.map(lambda x: f"{int(x):,}" if pd.notnull(x) else "")
+
+        # Ensure both series are strings before concatenation.
+        return formatted_scores.astype(str) + " (" + formatted_counts.astype(str) + ")"
+
+    df["data"] = format_score(df["data"], df["n_data"])
+    df["BSS_wrt_naive_mean"] = format_score(df["BSS_wrt_naive_mean"], df["n_data"])
 
     df = df[
         [
             "Ranking",
             "organization",
             "model",
-            "adj_brier_dataset",
-            "n_adj_brier_dataset",
+            "data",
+            "BSS_wrt_naive_mean",
+            "bootstrap_BSS_CI",
+            "pct_imputed",
+            "question_set",
         ]
     ]
     df = df.rename(
         columns={
             "organization": "Organization",
             "model": "Model",
-            "adj_brier_dataset": "Dataset",
-            "n_adj_brier_dataset": "N (dataset)",
+            "data": "Dataset Score",
+            "BSS_wrt_naive_mean": "BSS",
+            "bootstrap_BSS_CI": "BSS 95% CI",
+            "pct_imputed": "Pct. Imputed",
+            "question_set": "Question Set(s)",
         }
     )
 
@@ -225,22 +333,16 @@ def make_and_upload_html_table(df, title, basename):
                                                  aggregation platforms</li>
               <li><b>Overall Resolved Score</b>: The average of the Dataset Score and the Market
                                                  Score (resolved) columns</li>
-              <li><b>Overall Score</b>: The average of the Dataset Score and the Market Score
-                                        (overall) columns</li>
-              <li><b>Overall Score 95% CI</b>: The 95% confidence interval for the Overall
-                                               Score</li>
-              <li><b>Pairwise p-value comparing to No. 1 (bootstrapped)</b>: The p-value calculated
-                              by bootstrapping the differences in overall score between each model
-                              and the best forecaster (the group with rank 1) under the null
-                              hypothesis that there's no difference.</li>
-              <li><b>Pct. more accurate than No. 1</b>: The percent of questions where this
-                              forecaster had a better overall score than the best forecaster (with
-                              rank 1)</li>
+              <li><b>BSS</b>: The Brier skill score.
+              <li><b>BSS 95% CI</b>: The bootstrapped confidence interval for the BSS.
               <li><b>Pct. imputed</b>: The percent of questions for which this forecaster did not
                               provide a forecast and hence had a forecast value imputed (0.5 for
                               dataset questions and the aggregate human forecast on the forecast
                               due date for questions sourced from prediction markets or forecast
                               aggregation platforms)</li>
+              <li><b>Question Set(s)</b>: The question sets that were forecast on. If more than two
+                              question sets were forecast on, show the oldest and the most recent.
+                              </li>
             </ul>
           </div>
         </div>
@@ -262,8 +364,14 @@ def make_and_upload_html_table(df, title, basename):
     df = df[[c for c in df.columns if not c.startswith("n_")]]
 
     html_code = df.to_html(
-        classes="table table-striped table-bordered", index=False, table_id="myTable"
+        classes="table table-striped table-bordered",
+        index=False,
+        table_id="myTable",
+        escape=False,
+        render_links=True,
     )
+
+    ORDER_COL_IDX = 4
     html_code = (
         """<!DOCTYPE html>
 <html>
@@ -345,25 +453,54 @@ def make_and_upload_html_table(df, title, basename):
         + """
         </div>
         <script>
+        """
+        + r"""
+        $.fn.dataTable.ext.type.detect.unshift(function(data) {
+            if (/^-?\d+(\.\d+)? \(/.test(data.trim())) {
+                return 'bss-num';
+            }
+            return null;
+        });
+        $.fn.dataTable.ext.type.order['bss-num-pre'] = function(data) {
+            const match = data.match(/^(-?\d+(\.\d+)?) \(([\d,]+)\)/);
+            if (match) {
+                const bssValue = parseFloat(match[1]);
+                const parensValue = parseInt(match[3].replace(/,/g, ""), 10);
+                return bssValue + (parensValue / 100000000);
+            }
+            return [0, 0];
+        };
         $(document).ready(function() {
             var table = $('#myTable').DataTable({
                 "pageLength": -1,
-                "lengthMenu": [[-1], ["All"]],
-                "order": [[3, 'asc']],
+                "lengthMenu": [[-1], ["All"]],"""
+        + f"""
+                "order": [[{ORDER_COL_IDX}, "desc"]],"""
+        + """
                 "paging": false,
                 "info": false,
+                "orderMulti": false,
                 "search": {
                     "regex": true,
                     "smart": true
                 },
                 "columnDefs": [
+                    {"""
+        + f"""
+                        "targets": {ORDER_COL_IDX},"""
+        + """
+                        "type": "bss-num",
+                        "orderSequence": ["desc", "asc"]
+                    },
                     {
                         "targets": '_all',
                         "searchable": true
                     }
                 ]
             });
-        table.column(3).nodes().to$().addClass('highlight');
+        """
+        + f"""table.column({ORDER_COL_IDX}).nodes().to$().addClass("highlight");"""
+        + """
         });
         </script>
     </body>
@@ -381,16 +518,16 @@ def make_and_upload_html_table(df, title, basename):
 
     # Upload files to Cloud
     destination_folder = "leaderboards"
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_html,
-        destination_folder=f"{destination_folder}/html",
-    )
-    gcp.storage.upload(
-        bucket_name=env.PUBLIC_RELEASE_BUCKET,
-        local_filename=local_filename_csv,
-        destination_folder=f"{destination_folder}/csv",
-    )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_html,
+    #     destination_folder=f"{destination_folder}/html",
+    # )
+    # gcp.storage.upload(
+    #     bucket_name=env.PUBLIC_RELEASE_BUCKET,
+    #     local_filename=local_filename_csv,
+    #     destination_folder=f"{destination_folder}/csv",
+    # )
 
     return {
         local_filename_html: f"{destination_folder}/html/{basename}.html",
@@ -398,204 +535,343 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
-def combine_forecasting_rounds(leaderboard, leaderboard_type):
-    """Combine all forecasts into one dataframe."""
-    forecasts = []
-    for entry in leaderboard:
-        df_tmp = entry["df"].copy()
-        df_tmp["model"] = entry["model"]
-        df_tmp["organization"] = entry["organization"]
-        forecasts.append(df_tmp)
-    df = pd.concat(forecasts).reset_index(drop=True)
-    df["resolution_date"] = pd.to_datetime(df["resolution_date"])
-    df["forecast_due_date"] = pd.to_datetime(df["forecast_due_date"])
-    df["primary_key"] = (
-        df["forecast_due_date"].astype(str)
-        + "_"
-        + df["source"].astype(str)
-        + "_"
-        + df["id"].astype(str)
-        + "_"
-        + df["horizon"].astype(str)
+def get_BSS(df):
+    """Calculate the standard scores with respect to naive forecaster for every question set."""
+    # df["z_score_wrt_naive_mean"] = None
+    df["BSS_wrt_naive_mean"] = None
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
     )
-
-    # If a question was asked of the same model in more than one question set, only keep its
-    # forecast from the first question set.
-    df = df.sort_values(by=["model", "forecast_due_date"], ascending=True).drop_duplicates(
-        subset=["model", "source", "id", "horizon"], keep="first", ignore_index=True
-    )
-
+    print(df)
+    print(sorted(df.columns))
+    for forecast_due_date in df["forecast_due_date"].unique():
+        mask_forecast_due_date = df["forecast_due_date"] == forecast_due_date
+        naive_mask = mask_naive_forecaster & mask_forecast_due_date
+        naive_baseline_mean = df[naive_mask]["data"].values[0]
+        df.loc[mask_forecast_due_date, "BSS_wrt_naive_mean"] = (
+            1 - df[mask_forecast_due_date]["data"] / naive_baseline_mean
+        )
     return df
 
 
-def calculate_difficulty_adjusted_brier_score1(df):
-    res = smf.ols("score ~ -1 + C(model) + C(primary_key)", data=df).fit()
-    params = res.params
-    qe = {
-        n.split("[")[1].rstrip("]").lstrip("T."): v
-        for n, v in params.items()
-        if n.startswith("C(primary_key)")
+def prep_combo_for_get_leaderboard_entry_call(df_group):
+    """Prepare arguments for get_leaderboard_entry call from merge functions."""
+    df_combined = pd.concat(df_group["df"].tolist(), ignore_index=True)
+    forecast_due_dates = tuple(sorted(df_group["forecast_due_date"].tolist()))
+    question_set_filenames = tuple(sorted(df_group["question_set"].tolist()))
+    return df_combined, forecast_due_dates, question_set_filenames
+
+
+def create_naive_forecaster_leaderboard_entries(df_naive_forecaster):
+    """Make a single leaderboard entry for every forecast due date combo of the naive forecaster."""
+    combined_result = []
+    unique_forecast_due_dates = df_naive_forecaster["forecast_due_date"].unique()
+    org_and_model = {
+        "organization": BASELINE_ORG_MODEL["organization"],
+        "model": BASELINE_ORG_MODEL["model"],
     }
-    fe = {n.split("[")[1].rstrip("]"): v for n, v in params.items() if n.startswith("C(model)")}
-    df["question_effect"] = df["primary_key"].map(qe)
-    df["forecaster_effect"] = df["model"].map(fe)
-    df["adjusted_brier"] = df["score"] - df["question_effect"]
-    return df
-
-
-def calculate_difficulty_adjusted_brier_score(df):
-    """Use 2-way fixed effects model to calclutae the adjusted Brier score."""
-    N_ITERATIONS = 200
-    df_adjusted_brier = df[["organization", "model", "primary_key", "score"]].copy()
-    df_adjusted_brier["question_effect"] = 0.0
-    df_adjusted_brier["forecaster_effect"] = 0.0
-
-    tol = 1e-5
-    converged = False
-    prev_q = df_adjusted_brier["question_effect"].copy()
-    prev_f = df_adjusted_brier["forecaster_effect"].copy()
-
-    for _ in range(N_ITERATIONS):
-        # Question effects
-        df_tmp = (
-            df_adjusted_brier.groupby("primary_key")
-            .apply(
-                lambda x: pd.Series(
-                    {"question_effect": (x["score"] - x["forecaster_effect"]).mean()},
-                ),
-                include_groups=False,
+    for r in range(2, len(unique_forecast_due_dates) + 1):
+        for combo in itertools.combinations(unique_forecast_due_dates, r):
+            df_tmp = df_naive_forecaster[
+                df_naive_forecaster["forecast_due_date"].isin(combo)
+            ].copy()
+            df_combined, forecast_due_dates, question_set_filenames = (
+                prep_combo_for_get_leaderboard_entry_call(df_tmp)
             )
-            .reset_index()
-        )
-        df_adjusted_brier = df_adjusted_brier.drop("question_effect", axis=1)
-        df_adjusted_brier = pd.merge(df_adjusted_brier, df_tmp, on="primary_key", how="left")
+            combined_result += [
+                org_and_model
+                | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+            ]
+    return combined_result
 
-        # Forecaster effects
-        df_tmp = (
-            df_adjusted_brier.groupby("model")
-            .apply(
-                lambda x: pd.Series(
-                    {"forecaster_effect": (x["score"] - x["question_effect"]).mean()}
-                ),
-                include_groups=False,
+
+def merge_duplicates(df):
+    """Merge the duplicated entries into one entry."""
+    naive_forecaster_mask = get_naive_forecaster_mask(df)
+    df_naive_forecaster = df[naive_forecaster_mask].reset_index(drop=True)
+    df = df[~naive_forecaster_mask].reset_index(drop=True)
+
+    combined_result = []
+    for (organization, model), df_group in df.groupby(["organization", "model"]):
+        logger.info(f"Combining forecasts for: Organization: {organization} Model: {model}.")
+        org_and_model = {"organization": organization, "model": model}
+        df_combined, forecast_due_dates, question_set_filenames = (
+            prep_combo_for_get_leaderboard_entry_call(df_group)
+        )
+        combined_result += [
+            org_and_model
+            | get_leaderboard_entry(df_combined, forecast_due_dates, question_set_filenames)
+        ]
+
+    combined_result += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
+
+    df_merged = pd.DataFrame(combined_result)
+    # Add the individual naive forecaster lines back to the df to return. These will be used to
+    # bootstrap the BSS CI.
+    df_merged = pd.concat([df_merged, df_naive_forecaster], ignore_index=True)
+    df_merged = get_BSS(df_merged)
+
+    return df_merged  # .drop(index=to_drop).reset_index(drop=True)
+
+
+def merge_common_models(df):
+    """Merge common models for a given leaderboard."""
+    df = get_BSS(df)
+    df_duplicated = (
+        df[
+            df.duplicated(
+                subset=[
+                    "organization",
+                    "model",
+                ],
+                keep=False,
             )
-            .reset_index()
-        )
-        df_adjusted_brier = df_adjusted_brier.drop("forecaster_effect", axis=1)
-        df_adjusted_brier = pd.merge(df_adjusted_brier, df_tmp, on="model", how="left")
-
-        delta_q = (df_adjusted_brier["question_effect"] - prev_q).abs().max()
-        delta_f = (df_adjusted_brier["forecaster_effect"] - prev_f).abs().max()
-        if max(delta_q, delta_f) < tol:
-            converged = True
-            logger.info(colored(f"Converged at iteration {_}", "green"))
-            break
-        prev_q = df_adjusted_brier["question_effect"].copy()
-        prev_f = df_adjusted_brier["forecaster_effect"].copy()
-
-    if not converged:
-        logger.warning(
-            colored("Convergence not reached when calculating difficulty adjusted Brier!", "red")
-        )
-
-    df_adjusted_brier["adjusted_brier"] = (
-        df_adjusted_brier["score"] - df_adjusted_brier["question_effect"]
+        ]
+        .copy()
+        .reset_index(drop=True)
     )
-
-    return pd.merge(
-        df,
-        df_adjusted_brier[["organization", "model", "primary_key", "adjusted_brier"]],
-        on=[
+    if df_duplicated.empty:
+        return df
+    df = df.drop_duplicates(
+        subset=[
             "organization",
             "model",
-            "primary_key",
         ],
-        how="left",
-        validate="1:1",
+        keep=False,
+        ignore_index=True,
     )
+    df_duplicated = merge_duplicates(df_duplicated)
+    return pd.concat([df, df_duplicated], ignore_index=True)
 
 
-def bootstrap_adjusted_brier_ci(df, n_bootstraps=100, ci=0.95):
-    models = df["model"].unique()
-    boot_results = {model: [] for model in models}
+def bootstrap_BSS_CI(df):
+    """Bootstrap the confidence interval for the BSS."""
+    n_replications = 1000
+    mask_naive_forecaster_df = get_naive_forecaster_mask(df)
+    bootstrap_results = {}
+    df["bootstrap_BSS_CI"] = None
 
-    for _ in range(n_bootstraps):
-        sample = df.sample(frac=1, replace=True)
-        print(sample)
-        boot_df = calculate_difficulty_adjusted_brier_score(sample)
-        means = boot_df.groupby("model")["adjusted_brier"].mean()
-        for model, val in means.items():
-            boot_results[model].append(val)
+    def sample_block_indices_by_source_by_horizon(df, mask):
+        """Sample everything where mask is true, source by source."""
+        sampled_indices = []
+        for source in df[mask]["source"].unique():
+            source_mask = mask & (df["source"] == source)
+            for resolution_date in df[source_mask]["resolution_date"].unique():
+                source_horizon_mask = source_mask & (df["resolution_date"] == resolution_date)
+                available_indices = df.loc[source_horizon_mask].index.to_numpy()
+                if len(available_indices) == 0:
+                    raise ValueError("Available indices should not be empty.")
+                sampled_indices.append(
+                    np.random.choice(available_indices, size=len(available_indices), replace=True)
+                )
+        return np.concatenate(sampled_indices)
 
-    ci_lower = {}
-    ci_upper = {}
-    alpha = 1 - ci
-    for model, values in boot_results.items():
-        ci_lower[model] = np.percentile(values, 100 * (alpha / 2))
-        ci_upper[model] = np.percentile(values, 100 * (1 - alpha / 2))
+    def sample_block_indices_no_source(df, mask):
+        """Sample everything where mask is true."""
+        available_indices = df.loc[mask].index.to_numpy()
+        sampled_indices = np.random.choice(
+            available_indices, size=len(available_indices), replace=True
+        )
+        return sampled_indices
 
-    return pd.DataFrame(
-        {
-            "model": list(ci_lower.keys()),
-            "ci_lower": list(ci_lower.values()),
-            "ci_upper": list(ci_upper.values()),
-        }
+    def get_sample_indices(df, forecast_due_date, sample_indices):
+        """Get the indices for the given forecast due date."""
+        if forecast_due_date in sample_indices.keys():
+            return sample_indices[forecast_due_date]
+
+        if isinstance(forecast_due_date, tuple):
+            for f in forecast_due_date:
+                get_sample_indices(
+                    df[df["forecast_due_date"].astype(str) == f].reset_index(drop=True),
+                    f,
+                    sample_indices,
+                )
+
+            data = []
+            # market_resolved = []
+            # market_unresolved = []
+            for f in forecast_due_date:
+                offset = df[df["forecast_due_date"].astype(str) == f].index[0]
+                data.append(offset + sample_indices[f]["data"])
+                # market_resolved.append(offset + sample_indices[f]["market_resolved"])
+                # market_unresolved.append(offset + sample_indices[f]["market_unresolved"])
+
+            indices = {}
+            indices["data"] = np.concatenate(data)
+            # indices["market_resolved"] = np.concatenate(market_resolved)
+            # indices["market_unresolved"] = np.concatenate(market_unresolved)
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
+        else:
+            masks = get_masks(df)
+
+            indices = {}
+            indices["data"] = sample_block_indices_by_source_by_horizon(df, masks["data"])
+            # indices["market_resolved"] = sample_block_indices_no_source(
+            #     df,
+            #     masks["market_resolved"],
+            # )
+            # indices["market_unresolved"] = sample_block_indices_no_source(
+            #     df,
+            #     masks["market_unresolved"],
+            # )
+            sample_indices[forecast_due_date] = indices
+            return sample_indices[forecast_due_date]
+
+    def apply_sample_indices(df, indices):
+        """Apply the sample provided to df."""
+        df_updated = df.copy()
+        # For each block, update the score column in place.
+
+        masks = get_masks(df)
+
+        for block, boot_indices in indices.items():
+            # Define the mask for the block.
+            # Here you must know how each block is defined. For example:
+            if block not in masks.keys():
+                raise ValueError("should not arrive here (3).")
+
+            orig_indices = df_updated.loc[masks[block]].index
+            new_scores = df_updated.loc[boot_indices, "score"].reset_index(drop=True)
+            assert len(orig_indices) == len(
+                new_scores
+            ), "Mismatch in number of rows for market block"
+            df_updated.loc[orig_indices, "score"] = new_scores.to_numpy()
+
+        return df_updated
+
+    for _ in range(n_replications):
+        print(f"Replication {_}")
+
+        # Duplicate df with sampled scores for all models
+        df_tmp = df.copy()
+
+        # Drop combination of naive forecasters
+        # These should be recreated from the resampled individual naive forecasters
+        df_tmp = df_tmp[
+            ~(
+                mask_naive_forecaster_df
+                & df_tmp["question_set"].apply(lambda x: isinstance(x, tuple))
+            )
+        ].reset_index(drop=True)
+
+        leaderboard = []
+        sample_indices = {}
+        for _, row in df_tmp.iterrows():
+            df_model = row["df"].copy()
+
+            indices = get_sample_indices(df_model, row["forecast_due_date"], sample_indices)
+            df_model = apply_sample_indices(df_model, indices)
+
+            leaderboard += [
+                {
+                    "organization": row["organization"],
+                    "model": row["model"],
+                }
+                | get_leaderboard_entry(df_model, row["forecast_due_date"], row["question_set"])
+            ]
+
+        df_leaderboard = pd.DataFrame(leaderboard)
+        mask_naive_forecaster_df_leaderboard = get_naive_forecaster_mask(df_leaderboard)
+        df_naive_forecaster = (
+            df_leaderboard[mask_naive_forecaster_df_leaderboard].copy().reset_index(drop=True)
+        )
+        leaderboard += create_naive_forecaster_leaderboard_entries(df_naive_forecaster)
+
+        # Redo this to create the complete, resampled leaderboard
+        df_leaderboard = pd.DataFrame(leaderboard)
+
+        # Get BSS with the leaderboard, updated with the combined naive forecasters
+        df_leaderboard = get_BSS(df=df_leaderboard)
+        for _, row in df_leaderboard.iterrows():
+            key = (row["organization"], row["model"])
+            bss_value = row["BSS_wrt_naive_mean"]
+            bootstrap_results.setdefault(key, []).append(bss_value)
+
+    ci_results = {}
+    alpha = (1 - CONFIDENCE_LEVEL) / 2
+    for key, bss_values in bootstrap_results.items():
+        lower, upper = np.percentile(a=bss_values, q=[alpha * 100, (1 - alpha) * 100])
+        ci_results[key] = (lower, upper)
+
+    def assign_ci(row):
+        key = (row["organization"], row["model"])
+        ci = ci_results.get(key, None)
+        if ci is not None:
+            return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+        return None
+
+    df["bootstrap_BSS_CI"] = df.apply(assign_ci, axis=1)
+
+    # Remove extra naive forecasters
+    df_subset = df[mask_naive_forecaster_df].copy()
+    df_subset["tuple_length"] = df_subset["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
     )
+    if (df_subset["tuple_length"] > 0).any():
+        max_index = df_subset["tuple_length"].idxmax()
+        to_drop = df_subset.index.difference([max_index])
+        df = df.drop(index=to_drop).reset_index(drop=True)
+    return df
 
 
-def make_leaderboard(leaderboard, title, basename, leaderboard_type):
+def impute_BSS_CI(df):
+    mask_naive_forecaster = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        df["model"] == BASELINE_ORG_MODEL["model"]
+    )
+    df_tmp = df.copy()
+    df_tmp["tuple_length"] = df_tmp["forecast_due_date"].apply(
+        lambda x: len(x) if isinstance(x, (list, tuple)) else 0
+    )
+    df_tmp = df_tmp[df_tmp["tuple_length"] == df_tmp["tuple_length"].max()]
+    df_tmp = df_tmp[~mask_naive_forecaster]
+
+    z = norm.ppf(1 - (1 - CONFIDENCE_LEVEL) / 2)
+    print(z)
+    rel_uncertainties = []
+    for _, row in df_tmp.iterrows():
+        lower, upper = row["bootstrap_BSS_CI"]
+        print(lower, upper)
+        se = (upper - lower) / (2 * z)
+        rel_uncertainty = se / abs(row["BSS_wrt_naive_mean"])
+        rel_uncertainties.append(rel_uncertainty)
+    relative_uncertainty = np.mean(rel_uncertainties)
+
+    def impute_cis(bss, relative_uncertainty):
+        imputed_se = relative_uncertainty * abs(bss)
+        ci = bss - z * imputed_se, bss + z * imputed_se
+        return [round(x, LEADERBOARD_DECIMAL_PLACES) for x in ci]
+
+    non_human_forecast_bench_models = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
+        ~df["model"].isin(["Superforecaster median forecast", "Public median forecast"])
+    )
+    models_to_exclude = set(df_tmp[["organization", "model"]].apply(tuple, axis=1))
+    mask_impute_to = (
+        ~df[["organization", "model"]]
+        .apply(lambda row: (row["organization"], row["model"]), axis=1)
+        .isin(models_to_exclude)
+    ) & ~non_human_forecast_bench_models
+
+    print("printing mask impute to cols")
+    print(df[mask_impute_to])
+    df["relative_uncertainty"] = relative_uncertainty
+    df["imputed_BSS_CI"] = df["bootstrap_BSS_CI"]
+    df.loc[mask_impute_to, "imputed_BSS_CI"] = df.loc[mask_impute_to, "BSS_wrt_naive_mean"].apply(
+        impute_cis, args=(relative_uncertainty,)
+    )
+    print(df)
+    return df
+
+
+def make_leaderboard(leaderboard, title, basename):
     """Make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-
-    df = combine_forecasting_rounds(leaderboard, leaderboard_type)
-    df_leaderboard = None
-    for question_set in ["dataset"]:
-        if question_set == "market":
-            df_tmp = df[df["source"].isin(question_curation.MARKET_SOURCES)]
-        elif question_set == "dataset":
-            df_tmp = df[df["source"].isin(question_curation.DATA_SOURCES)]
-        else:
-            df_tmp = df
-        # df_tmp1 = df_tmp.copy()
-        df_tmp = calculate_difficulty_adjusted_brier_score(df_tmp)
-        # df_tmp_ci = bootstrap_adjusted_brier_ci(df_tmp1)
-        col_name = f"adj_brier_{question_set}"
-        df_tmp[col_name] = df_tmp["adjusted_brier"]
-        grouped = df_tmp[["organization", "model", col_name]].groupby(["organization", "model"])
-        mean_df = grouped.mean()
-        count_df = grouped.count().rename(columns={col_name: f"n_{col_name}"})
-        df_leaderboard_tmp = (
-            pd.concat(
-                [
-                    mean_df,
-                    count_df,
-                ],
-                axis=1,
-            )
-            .reset_index()
-            .sort_values(col_name)
-            .reset_index(drop=True)
-        )
-
-        # df_leaderboard_tmp = pd.merge(
-        #     df_leaderboard_tmp,
-        #     df_tmp_ci,
-        #     on=["model"],
-        #     how="left",
-        #     validate="1:1",
-        # )
-        if df_leaderboard is None:
-            df_leaderboard = df_leaderboard_tmp
-        else:
-            df_leaderboard = pd.merge(
-                df_leaderboard,
-                df_leaderboard_tmp,
-                on=["organization", "model"],
-                how="left",
-            )
-
+    df = pd.DataFrame(leaderboard)
+    df = merge_common_models(df)
+    df = bootstrap_BSS_CI(df)
+    # df = impute_BSS_CI(df)
     files = make_and_upload_html_table(
-        df=df_leaderboard,
+        df=df,
         title=title,
         basename=basename,
     )
@@ -610,7 +886,6 @@ def worker(task):
             leaderboard=task["leaderboard"],
             title=task["title"],
             basename=task["basename"],
-            leaderboard_type=task["leaderboard_type"],
         )
     except Exception as e:
         msg = f"Error processing task {task['title']}: {e}"
@@ -621,59 +896,23 @@ def worker(task):
 @decorator.log_runtime
 def driver(_):
     """Create new leaderboard."""
-    # Shortcut while testing
-    if os.path.exists("leaderboard_human.pkl") and os.path.exists("leaderboard_llm.pkl"):
-
-        def read_leaderboard(f):
-            with open(f, "rb") as file:
-                leaderboard = pickle.load(file)
-            return leaderboard
-
-        # # TODO: Look into API calls for these models:
-        # Removing:  Claude-2.1 (scratchpad)
-        # Removing:  Claude-2.1 (scratchpad with freeze values)
-        # Removing:  Mixtral-8x7B-Instruct-V0.1 (superforecaster with news 2)
-        # Removing:  DeepSeek-R1 (zero shot)
-        # Removing:  DeepSeek-R1 (zero shot with freeze values)
-        # Removing:  DeepSeek-R1 (zero shot)
-        # Removing:  DeepSeek-R1 (zero shot with freeze values)
-        # Removing:  DeepSeek-R1 (zero shot)
-        # Removing:  DeepSeek-R1 (zero shot with freeze values)
-        # Removing:  Gemini-2.5-Pro-Exp-03-25 (scratchpad)
-        # Removing:  Gemini-2.5-Pro-Exp-03-25 (scratchpad with freeze values)
-        # Removing:  Gemini-2.5-Pro-Exp-03-25 (zero shot)
-        # Removing:  Gemini-2.5-Pro-Exp-03-25 (zero shot with freeze values)
-        # Removing:  QwQ-32B-Preview (zero shot)
-        # Removing:  QwQ-32B-Preview (zero shot with freeze values)
-
-        title = "Leaderboard: overall"
-        make_leaderboard(
-            leaderboard=read_leaderboard("leaderboard_human.pkl"),
-            title=f"Human {title}",
-            basename="human_leaderboard_overall",
-            leaderboard_type="human",
-        )
-        # make_leaderboard(
-        #     leaderboard=read_leaderboard("leaderboard_llm.pkl"),
-        #     title=title,
-        #     basename="leaderboard_overall",
-        #     leaderboard_type="llm",
-        # )
-        return
-
     cache = {}
     llm_leaderboard = {}
     human_leaderboard = {}
+    # llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
     files = [
         file
         for file in files
         if file.endswith(".json")
-        and file.startswith("2024-07-21")
-        or file.startswith("2025-03-02")
-        or file.startswith("2025-03-30")
-        or file.startswith("2025-03-16")
+        and (
+            file.startswith("2024-07-21")
+            or file.startswith("2025-03-02")
+            or file.startswith("2025-03-30")
+            or file.startswith("2025-03-16")
+        )
     ]
+    files = [file for file in files if file.endswith(".json")]
 
     with ThreadPoolExecutor() as executor:
         dfs = list(
@@ -731,8 +970,8 @@ def driver(_):
         )
 
         org_and_model = {"organization": organization, "model": model}
-        is_human_forecast_set = organization == constants.BENCHMARK_NAME and (
-            model in [SUPERFORECASTER_MODEL["model"], GENERAL_PUBLIC_MODEL["model"]]
+        is_human_forecast_set = (
+            org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
 
         # Remove Market questions:
@@ -776,31 +1015,66 @@ def driver(_):
             question_set_filename=question_set_filename,
         )
 
-    title = "Leaderboard"
+    title = "Leaderboard: overall"
     tasks = [
         {
             "leaderboard": llm_leaderboard["overall"],
-            "title": f"LLM {title}",
-            "basename": f"llm_{title.lower()}",
-            "leaderboard_type": "llm",
+            "title": title,
+            "basename": "leaderboard_overall",
         },
+        # {
+        #     "leaderboard": human_leaderboard["overall"],
+        #     "title": f"Human {title}",
+        #     "basename": "human_leaderboard_overall_high_level",
+        # },
         {
             "leaderboard": human_leaderboard["overall"],
             "title": f"Human {title}",
-            "basename": f"human_{title.lower()}",
-            "leaderboard_type": "human",
+            "basename": "human_leaderboard_overall",
         },
+        # {
+        #     "d": human_leaderboard["7"],
+        #     "title": f"Human {title} 7 day",
+        #     "basename": "human_leaderboard_overall_7",
+        # },
+        # {
+        #     "d": human_leaderboard["30"],
+        #     "title": f"Human {title} 30 day",
+        #     "basename": "human_leaderboard_overall_30",
+        # },
+        # {
+        #     "d": human_leaderboard["90"],
+        #     "title": f"Human {title} 90 day",
+        #     "basename": "human_leaderboard_overall_90",
+        # },
+        # {
+        #     "d": human_leaderboard["180"],
+        #     "title": f"Human {title} 180 day",
+        #     "basename": "human_leaderboard_overall_180",
+        # },
+        # {
+        #     "d": llm_and_human_combo_leaderboard["overall"],
+        #     "title": f"Human Combo {title}",
+        #     "basename": "human_combo_leaderboard_overall",
+        # },
     ]
 
-    with open("leaderboard_llm.pkl", "wb") as file:
-        pickle.dump(llm_leaderboard["overall"], file)
-
-    with open("leaderboard_human.pkl", "wb") as file:
-        pickle.dump(human_leaderboard["overall"], file)
-
     logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")
-    with Pool(processes=min(len(tasks), env.NUM_CPUS)) as pool:
-        _ = pool.map(worker, tasks)
+    with Pool(processes=env.NUM_CPUS) as pool:
+        results = pool.map(worker, tasks)
+
+    files = {}
+    for res in results:
+        files.update(res)
+
+    mirrors = keys.get_secret_that_may_not_exist("HUGGING_FACE_REPO_URL")
+    mirrors = [mirrors] if mirrors else []
+    git.clone_and_push_files(
+        repo_url=keys.API_GITHUB_DATASET_REPO_URL,
+        files=files,
+        commit_message="leaderboard: automatic update html & csv files.",
+        mirrors=mirrors,
+    )
 
 
 if __name__ == "__main__":

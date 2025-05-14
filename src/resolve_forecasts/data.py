@@ -31,6 +31,9 @@ def resolve(source, df, dfq, dfr):
     logger.info(f"Resolving {source}.")
     df_data, df = resolution.split_dataframe_on_source(df=df, source=source)
 
+    print(source)
+    print(df_data[df_data["id"] == "ABNB"])
+
     # Check that we have stock info for all stocks in the dataset
     unique_ids_for_resolved_stocks = dfr["id"].unique()
 
@@ -61,6 +64,11 @@ def resolve(source, df, dfq, dfr):
     df_standard["resolved_to"] = df_standard["value"]
     df_standard = df_standard.drop(columns=["date", "value"])
 
+    print("resolved to determined")
+    print(df_standard[df_standard["id"] == "ABNB"])
+
+    print(dfr[dfr["id"] == "ABNB"])
+
     # Get stock values at forecast_due_date
     # These values are assigned to any forecasts the organization may have omitted.
     df_standard = pd.merge(
@@ -73,6 +81,9 @@ def resolve(source, df, dfq, dfr):
     df_standard["market_value_on_due_date"] = df_standard["value"]
     df_standard = df_standard.drop(columns=["date", "value"])
     df_standard.sort_values(by=["id", "resolution_date"], inplace=True, ignore_index=True)
+
+    print("market value on due date determined")
+    print(df_standard[df_standard["id"] == "ABNB"])
 
     # DBnomics stores N/A if no weather data was reported, so the `resolved_to` and
     # `market_value_on_due_date` columns potentially have "N/A" values. Replace with `np.nan`
@@ -90,6 +101,10 @@ def resolve(source, df, dfq, dfr):
         ),
         axis=1,
     )
+
+    print("resolution value deterimned in resolved_to")
+    print(df_standard[df_standard["id"] == "ABNB"])
+    sys.exit()
 
     # Setup combo resolutions given df_standard
     for index, row in df_combo.iterrows():

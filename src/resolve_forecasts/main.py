@@ -150,6 +150,7 @@ def resolve_questions(df, resolution_values):
     )
     err_msg_pre = "Error in `resolve_questions()`:"
     for source in df["source"].unique():
+        source = "yfinance"
         logger.info(f"Resolving {source}.")
         source_data = resolution_values.get(source, {})
         dfq = source_data.get("dfq", {}).copy()
@@ -185,6 +186,7 @@ def resolve_questions(df, resolution_values):
             f"* Resolving {source}: #NaN {n_na}/{len(df_tmp)} Total for "
             f"{n_dates} dates, {n_single} single & {n_combo} combo questions."
         )
+        sys.exit()
 
     # Remove all forecasts on dataset questions that have not resolved
     n_pre_drop = len(df)

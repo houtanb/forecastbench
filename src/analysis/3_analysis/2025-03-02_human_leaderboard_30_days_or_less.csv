@@ -1,0 +1,23 @@
+Ranking,Organization,Model,Dataset Score (N=239),Pct. Imputed
+1,OpenAI,GPT-4.5-Preview-2025-02-27 (scratchpad),0.151,0%
+2,OpenAI,GPT-4.5-Preview-2025-02-27 (zero shot),0.154,0%
+3,Anthropic,Claude-3-7-Sonnet-20250219 (scratchpad),0.155,0%
+4,DeepSeek,DeepSeek-R1 (scratchpad),0.158,0%
+5,OpenAI,O3-Mini-2025-01-31 (scratchpad),0.164,0%
+6,Anthropic,Claude-3-7-Sonnet-20250219 (zero shot),0.164,0%
+7,OpenAI,O3-Mini-2025-01-31 (zero shot),0.165,0%
+8,Anthropic,Claude-3-5-Sonnet-20241022 (zero shot),0.171,0%
+9,Anthropic,Claude-3-5-Sonnet-20240620 (zero shot),0.172,0%
+10,Anthropic,Claude-3-5-Sonnet-20240620 (scratchpad),0.177,0%
+11,DeepSeek,DeepSeek-V3 (scratchpad),0.18,1%
+12,DeepSeek,DeepSeek-V3 (zero shot),0.18,0%
+13,Meta,Llama-3.3-70B-Instruct-Turbo (scratchpad),0.184,0%
+14,Meta,Llama-3.3-70B-Instruct-Turbo (zero shot),0.187,0%
+15,Anthropic,Claude-3-5-Sonnet-20241022 (scratchpad),0.193,2%
+16,DeepSeek,DeepSeek-R1 (zero shot),0.203,0%
+17,ForecastBench,Naive Forecaster,0.244,0%
+18,ForecastBench,Imputed Forecaster,0.25,100%
+18,ForecastBench,Always 0.5,0.25,0%
+20,ForecastBench,Random Uniform,0.32,0%
+21,ForecastBench,Always 0,0.41,0%
+22,ForecastBench,Always 1,0.59,0%

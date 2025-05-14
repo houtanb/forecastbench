@@ -79,8 +79,17 @@ def get_leaderboard_entry(df):
 
 def add_to_leaderboard(leaderboard, org_and_model, df, forecast_due_date):
     """Add scores to the leaderboard."""
-    leaderboard_entry = [org_and_model | get_leaderboard_entry(df)]
-    leaderboard["overall"] = leaderboard.get("overall", []) + leaderboard_entry
+    lens = []
+    for horizon in [7, 30, 90, 180]:
+        df_tmp = df[df["resolution_date"] <= df["forecast_due_date"] + timedelta(days=horizon)]
+        if len(lens):
+            if lens[-1] == len(df_tmp):
+                break
+        lens.append(len(df_tmp))
+        if df_tmp.empty:
+            raise ValueError(f"\n\ndf_tmp is empty {horizon}\n\n")
+        leaderboard_entry = [org_and_model | get_leaderboard_entry(df_tmp)]
+        leaderboard[str(horizon)] = leaderboard.get(str(horizon), []) + leaderboard_entry
 
 
 def add_to_llm_leaderboard(*args, **kwargs):
@@ -155,26 +164,12 @@ def make_and_upload_html_table(df, title, basename):
     n_data = df["n_data"].max()
     df["pct_imputed"] = df["pct_imputed"].round(0).astype(int).astype(str) + "%"
 
-    def get_p_value_display(p):
-        if not isinstance(p, (float, int)):
-            return str(p)
-        if p < 0.001:
-            return "<0.001"
-        if p < 0.01:
-            return "<0.01"
-        if p < 0.05:
-            return "<0.05"
-        return f"{p:.{LEADERBOARD_DECIMAL_PLACES}f}"
-
-    df["p-value_pairwise_bootstrap"] = df["p-value_pairwise_bootstrap"].apply(get_p_value_display)
-
     df = df[
         [
             "Ranking",
             "organization",
             "model",
             "data",
-            "p-value_pairwise_bootstrap",
             "pct_imputed",
         ]
     ]
@@ -183,7 +178,6 @@ def make_and_upload_html_table(df, title, basename):
             "organization": "Organization",
             "model": "Model",
             "data": f"Dataset Score (N={n_data:,})",
-            "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
             "pct_imputed": "Pct. Imputed",
         }
     )
@@ -330,157 +324,11 @@ def make_and_upload_html_table(df, title, basename):
     }
 
 
-def get_pairwise_p_values(df, n_replications):
-    """Calculate p-values on Brier differences on individual questions.
-
-    From Ezra: this improves precision because, for any two groups, forecasting accuracy is very
-    correlated on the set of questions. Treating them as independent overstates
-    imprecision. Instead, we can bootstrap the questions by focusing on the difference in scores on
-    a question-by-question basis.
-
-    A nice example of this is that if group A is always epsilon more accurate than group B on every
-    question, we can be quite confident A is a better forecaster, even if epsilon is arbitrarily
-    small and even if the standard deviation of accuracy for group A's forecasts is high.
-    """
-    p_val_bootstrap_col_name = "p-value_pairwise_bootstrap"
-    df[p_val_bootstrap_col_name] = None
-    better_than_super_col_name = "pct_better_than_no1"
-    df[better_than_super_col_name] = 0.0
-
-    # Get best performer
-    best_organization = df.at[0, "organization"]
-    best_model = df.at[0, "model"]
-    logger.info(f"p-value comparison best performer is: {best_organization} {best_model}.")
-
-    df_best = pd.DataFrame(df.at[0, "df"])
-    observed_overall_score_best = df.at[0, "data"]
-
-    for index in range(1, len(df)):
-        df_comparison = pd.DataFrame(df.at[index, "df"])
-        observed_overall_score_comparison = df.at[index, "data"]
-
-        # first merge on the questions to then get the diff between the scores
-        df_merged = pd.merge(
-            df_best.copy(),
-            df_comparison,
-            on=[
-                "id",
-                "source",
-                "direction",
-                "forecast_due_date",
-                "resolved",
-                "resolution_date",
-            ],
-            how="inner",
-            suffixes=[
-                "_best",
-                "_comparison",
-            ],
-        )
-        df_merged = df_merged[["id", "source", "resolved", "score_comparison", "score_best"]]
-
-        if not (len(df_best) == len(df_comparison) and len(df_best) == len(df_merged)):
-            missing_in_comparison = df_best.merge(
-                df_comparison,
-                on=[
-                    "id",
-                    "source",
-                    "direction",
-                    "forecast_due_date",
-                    "resolved",
-                    "resolution_date",
-                ],
-                how="left",
-                indicator=True,
-            ).query('_merge == "left_only"')
-
-            missing_in_best = df_comparison.merge(
-                df_best,
-                on=[
-                    "id",
-                    "source",
-                    "direction",
-                    "forecast_due_date",
-                    "resolved",
-                    "resolution_date",
-                ],
-                how="left",
-                indicator=True,
-            ).query('_merge == "left_only"')
-
-            print(missing_in_comparison)
-            print(missing_in_best)
-
-            raise ValueError(
-                "Problem with merge in `get_pairwise_p_values()`. Comparing org: "
-                f"{df.at[index, 'organization']}, model: {df.at[index, 'model']} "
-                f"n_best: {len(df_best)}, n_comparison: {len(df_comparison)}, "
-                f"n_merged: {len(df_merged)}"
-            )
-
-        df_merged_data = df_merged[
-            (df_merged["source"].isin(resolution.DATA_SOURCES)) & df_merged["resolved"].astype(bool)
-        ].reset_index(drop=True)
-        df_merged_data_diff = df_merged_data["score_comparison"] - df_merged_data["score_best"]
-
-        observed_difference = observed_overall_score_comparison - observed_overall_score_best
-        assert (
-            abs(observed_difference - df_merged_data_diff.mean()) < 1e-15
-        ), "Observed difference in scores is incorrect in `get_pairwise_p_values()`."
-
-        # Shift mean of scores to 0 for the null hypothesis that comparison and best scores are
-        # identical and hence their difference is 0
-        df_merged_data_diff -= df_merged_data_diff.mean()
-
-        assert (
-            df_merged_data_diff.mean()
-        ) < 1e-15, "Observed difference in scores is incorrect in `get_pairwise_p_values()`."
-
-        n_data = len(df_merged_data_diff)
-
-        # Bootstrap p-value
-        overall_diff = []
-        for _ in range(n_replications):
-            df_data_diff_bootstrapped = df_merged_data_diff.sample(
-                n=n_data, replace=True, ignore_index=True
-            )
-            overall_diff.append(df_data_diff_bootstrapped.mean())
-        overall_diff = np.array(overall_diff)
-
-        df.at[index, p_val_bootstrap_col_name] = np.mean(overall_diff >= observed_difference)
-
-        # Percent better than supers
-        df_combo = df_merged_data.reset_index(drop=True)
-        df.at[index, better_than_super_col_name] = (
-            np.round(
-                np.mean(df_combo["score_comparison"] < df_combo["score_best"]),
-                LEADERBOARD_DECIMAL_PLACES,
-            )
-            * 100
-        )
-
-    return df
-
-
-def get_p_values(d):
-    """Get p values comparing comparison to best to see if they're significantly different."""
-    n_replications = 10000
-    df = pd.DataFrame(d)
-    df = df.sort_values(by=["data"], ignore_index=True)
-
-    # Only get pairwise p-values for now, skip treating questions as indpendent.
-    # Keeping the code because it may come in handy when we run a new round with a different
-    # question set.
-    df = get_pairwise_p_values(df, n_replications)
-    df.drop(columns="df", inplace=True)
-    return df
-
-
 def make_leaderboard(d, title, basename):
     """Get p-values and make leaderboard."""
     logger.info(colored(f"Making leaderboard: {title}", "red"))
-    df = get_p_values(d)
-    # df = pd.DataFrame(d)
+    # df = get_p_values(d)
+    df = pd.DataFrame(d)
     files = make_and_upload_html_table(
         df=df,
         title=title,
@@ -576,26 +424,9 @@ def driver(_):
             # Remove Combos
             df = df[~df["id"].apply(resolution.is_combo)]
 
-            # Remove everything resolved after 30 days
-            df = df[df["resolution_date"] <= df["forecast_due_date"] + timedelta(days=30)]
-
-            # Only include forecast rounds that have had both sets of questions resolve
-            res_dates = df["resolution_date"].unique()
-            if len(res_dates) != 2:
-                print(f"NEED 2 RES DATES: {res_dates}")
-                break
-            else:
-                r1, r2 = res_dates[0], res_dates[1]
-                print(
-                    f"{r1}: ",
-                    len(df[df["resolution_date"] == r1]),
-                    f"{r2}: ",
-                    len(df[df["resolution_date"] == r2]),
-                )
-                print()
-
             if not is_human_forecast_set:
                 add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)
+
             add_to_llm_and_human_leaderboard(
                 llm_and_human_leaderboard,
                 org_and_model,
@@ -604,23 +435,27 @@ def driver(_):
                 cache,
             )
 
-        title = f"{directory} Leaderboard: overall"
-        tasks = [
-            {
-                "d": llm_leaderboard["overall"],
-                "title": title,
-                "basename": f"{directory}_leaderboard_overall",
-            },
-            {
-                "d": llm_and_human_leaderboard["overall"],
-                "title": f"Human {title}",
-                "basename": f"{directory}_human_leaderboard_overall",
-            },
-        ]
+        for horizon in [7, 30, 90, 180]:
+            key = str(horizon)
+            if key not in llm_leaderboard.keys():
+                break
+            title = f"{directory} Leaderboard: {horizon} days"
+            tasks = [
+                {
+                    "d": llm_leaderboard[key],
+                    "title": title,
+                    "basename": f"{directory}_leaderboard_{key}_days_or_less",
+                },
+                {
+                    "d": llm_and_human_leaderboard[key],
+                    "title": f"Human {title}",
+                    "basename": f"{directory}_human_leaderboard_{key}_days_or_less",
+                },
+            ]
 
-        logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")
-        with Pool(processes=env.NUM_CPUS) as pool:
-            _ = pool.map(worker, tasks)
+            logger.info(f"Using {env.NUM_CPUS} cpus for worker pool.")
+            with Pool(processes=env.NUM_CPUS) as pool:
+                _ = pool.map(worker, tasks)
 
 
 if __name__ == "__main__":

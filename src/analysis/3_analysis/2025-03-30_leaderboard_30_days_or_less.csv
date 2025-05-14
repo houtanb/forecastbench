@@ -1,0 +1,33 @@
+Ranking,Organization,Model,Dataset Score (N=590),Pct. Imputed
+1,DeepSeek,DeepSeek-V3 (scratchpad),0.15,0%
+2,Anthropic,Claude-3-7-Sonnet-20250219 (scratchpad),0.155,0%
+3,OpenAI,O3-Mini-2025-01-31 (zero shot),0.155,0%
+4,DeepSeek,DeepSeek-R1 (scratchpad),0.16,0%
+5,OpenAI,O3-Mini-2025-01-31 (scratchpad),0.16,0%
+6,Anthropic,Claude-3-7-Sonnet-20250219 (zero shot),0.162,0%
+7,Anthropic,Claude-3-5-Sonnet-20241022 (zero shot),0.163,0%
+8,DeepSeek,DeepSeek-V3 (zero shot),0.165,0%
+9,Mistral,Mistral-Large-2407 (zero shot),0.169,0%
+10,Anthropic,Claude-3-5-Sonnet-20240620 (zero shot),0.169,0%
+11,xAI,Grok-2-1212 (zero shot),0.172,0%
+12,OpenAI,GPT-4o-2024-05-13 (zero shot),0.172,0%
+13,Anthropic,Claude-3-5-Sonnet-20240620 (scratchpad),0.177,0%
+14,Anthropic,Claude-3-5-Sonnet-20241022 (scratchpad),0.178,0%
+15,Meta,Llama-3.3-70B-Instruct-Turbo (scratchpad),0.181,0%
+16,Meta,Llama-3.3-70B-Instruct-Turbo (zero shot),0.182,0%
+17,DeepSeek,DeepSeek-R1 (zero shot),0.183,0%
+18,Qwen,QwQ-32B-Preview (zero shot),0.185,0%
+19,Google,Gemini-2.0-Flash-Lite-001 (scratchpad),0.187,0%
+20,Google,Gemini-2.5-Pro-Exp-03-25 (zero shot),0.191,0%
+21,OpenAI,GPT-4o-2024-05-13 (scratchpad),0.192,0%
+22,Mistral,Mistral-Large-2407 (scratchpad),0.195,1%
+23,Qwen,QwQ-32B-Preview (scratchpad),0.209,1%
+24,xAI,Grok-2-1212 (scratchpad),0.21,10%
+25,Google,Gemini-2.0-Flash-Lite-001 (zero shot),0.217,0%
+26,Google,Gemini-2.5-Pro-Exp-03-25 (scratchpad),0.25,0%
+27,ForecastBench,Imputed Forecaster,0.25,100%
+27,ForecastBench,Always 0.5,0.25,0%
+29,ForecastBench,Naive Forecaster,0.258,0%
+30,ForecastBench,Random Uniform,0.316,0%
+31,ForecastBench,Always 0,0.336,0%
+32,ForecastBench,Always 1,0.664,0%

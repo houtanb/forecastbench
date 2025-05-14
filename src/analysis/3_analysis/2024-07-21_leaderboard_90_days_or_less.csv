@@ -1,0 +1,94 @@
+Ranking,Organization,Model,Dataset Score (N=850),Pct. Imputed
+1,Anthropic,Claude-3-5-Sonnet-20240620 (scratchpad),0.16,0%
+2,Anthropic,Claude-3-5-Sonnet-20240620 (zero shot),0.163,0%
+3,Anthropic,Claude-3-5-Sonnet-20240620 (scratchpad with news),0.171,0%
+4,Anthropic,Claude-3-5-Sonnet-20240620 (superforecaster with news 1),0.172,0%
+5,Anthropic,Claude-3-Opus-20240229 (scratchpad),0.177,0%
+6,OpenAI,GPT-4-Turbo-2024-04-09 (zero shot),0.177,0%
+7,Anthropic,Claude-3-Opus-20240229 (superforecaster with news 1),0.177,0%
+8,OpenAI,GPT-4 (zero shot),0.18,0%
+9,Google,Gemini-1.5-Pro (scratchpad),0.181,0%
+10,OpenAI,GPT-4-Turbo-2024-04-09 (scratchpad),0.182,0%
+11,OpenAI,GPT-4o (scratchpad),0.183,0%
+12,Mistral AI,Mistral-Large-Latest (scratchpad),0.185,0%
+13,Anthropic,Claude-3-5-Sonnet-20240620 (superforecaster with news 3),0.186,5%
+14,Anthropic,Claude-3-Opus-20240229 (zero shot),0.187,0%
+15,Anthropic,Claude-3-Opus-20240229 (superforecaster with news 2),0.188,0%
+16,Google,Gemini-1.5-Pro (scratchpad with news),0.188,0%
+17,Qwen,Qwen1.5-110B-Chat (scratchpad),0.19,0%
+18,OpenAI,GPT-4 (scratchpad),0.192,0%
+19,Qwen,Qwen1.5-110B-Chat (scratchpad with news),0.193,0%
+20,OpenAI,GPT-4o (scratchpad with news),0.193,0%
+21,Qwen,Qwen1.5-110B-Chat (zero shot),0.198,0%
+22,Meta,Llama-3-70b-Chat-Hf (zero shot),0.198,0%
+23,OpenAI,GPT-4-Turbo-2024-04-09 (scratchpad with news),0.198,0%
+24,Anthropic,Claude-3-Opus-20240229 (scratchpad with news),0.198,0%
+25,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (scratchpad),0.199,0%
+26,Mistral AI,Mistral-Large-Latest (zero shot),0.2,0%
+27,Anthropic,Claude-3-Opus-20240229 (superforecaster with news 3),0.201,14%
+28,Anthropic,Claude-3-5-Sonnet-20240620 (superforecaster with news 2),0.201,0%
+29,Meta,Llama-3-70b-Chat-Hf (scratchpad),0.202,0%
+30,Google,Gemini-1.5-Pro (superforecaster with news 3),0.202,0%
+31,Qwen,Qwen1.5-110B-Chat (superforecaster with news 1),0.202,0%
+32,Google,Gemini-1.5-Pro (zero shot),0.203,0%
+33,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (scratchpad with news),0.204,0%
+34,Mistral AI,Mistral-Large-Latest (superforecaster with news 2),0.205,3%
+35,OpenAI,GPT-4-Turbo-2024-04-09 (superforecaster with news 1),0.205,0%
+36,Meta,Llama-3-8b-Chat-Hf (zero shot),0.205,0%
+37,Google,Gemini-1.5-Flash (scratchpad),0.205,0%
+38,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (zero shot),0.206,0%
+39,Mistral AI,Mistral-Large-Latest (scratchpad with news),0.207,0%
+40,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 1),0.208,0%
+41,OpenAI,GPT-4o (zero shot),0.21,0%
+42,Mistral AI,Mistral-Large-Latest (superforecaster with news 1),0.21,0%
+43,Google,Gemini-1.5-Flash (zero shot),0.21,0%
+44,OpenAI,GPT-4o (superforecaster with news 1),0.211,0%
+45,Google,Gemini-1.5-Pro (superforecaster with news 1),0.212,0%
+46,OpenAI,GPT-4o (superforecaster with news 3),0.212,12%
+47,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (scratchpad),0.213,0%
+48,Anthropic,Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),0.214,0%
+49,OpenAI,GPT-4-Turbo-2024-04-09 (superforecaster with news 3),0.214,23%
+50,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (zero shot),0.216,0%
+51,Qwen,Qwen1.5-110B-Chat (superforecaster with news 3),0.217,11%
+52,Anthropic,Claude-2.1 (zero shot),0.218,0%
+53,Google,Gemini-1.5-Flash (scratchpad with news),0.219,0%
+54,Anthropic,Claude-2.1 (scratchpad with news),0.222,0%
+55,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 3),0.222,27%
+56,Anthropic,Claude-2.1 (scratchpad),0.223,0%
+57,Qwen,Qwen1.5-110B-Chat (superforecaster with news 2),0.223,5%
+58,Google,Gemini-1.5-Pro (superforecaster with news 2),0.226,0%
+59,Mistral AI,Mistral-Large-Latest (superforecaster with news 3),0.227,14%
+60,Mistral AI,Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),0.227,3%
+61,OpenAI,GPT-4-Turbo-2024-04-09 (superforecaster with news 2),0.228,4%
+62,Anthropic,Claude-2.1 (superforecaster with news 3),0.229,6%
+63,Meta,Llama-3-8b-Chat-Hf (scratchpad),0.23,0%
+64,Google,Gemini-1.5-Flash (superforecaster with news 2),0.233,0%
+65,ForecastBench,"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",0.233,66%
+66,ForecastBench,"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",0.233,66%
+67,Anthropic,Claude-2.1 (superforecaster with news 2),0.233,1%
+68,ForecastBench,"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",0.234,66%
+69,Meta,Llama-2-70b-Chat-Hf (scratchpad),0.238,0%
+70,Anthropic,Claude-3-Haiku-20240307 (scratchpad),0.239,0%
+71,Anthropic,Claude-3-Haiku-20240307 (superforecaster with news 2),0.24,0%
+72,OpenAI,GPT-4o (scratchpad with SECOND news),0.24,3%
+73,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (superforecaster with news 2),0.24,1%
+74,Anthropic,Claude-2.1 (superforecaster with news 1),0.241,0%
+75,Google,Gemini-1.5-Flash (superforecaster with news 3),0.241,19%
+76,Google,Gemini-1.5-Flash (superforecaster with news 1),0.241,0%
+77,OpenAI,GPT-4o (superforecaster with news 2),0.246,1%
+78,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (superforecaster with news 3),0.246,2%
+79,ForecastBench,Always 0.5,0.25,0%
+79,ForecastBench,Imputed Forecaster,0.25,100%
+81,Meta,Llama-2-70b-Chat-Hf (zero shot),0.251,0%
+82,OpenAI,GPT-3.5-Turbo-0125 (scratchpad),0.254,0%
+83,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (superforecaster with news 1),0.254,1%
+84,Anthropic,Claude-3-Haiku-20240307 (superforecaster with news 3),0.257,40%
+85,Mistral AI,Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),0.266,0%
+86,Anthropic,Claude-3-Haiku-20240307 (scratchpad with news),0.271,0%
+87,Anthropic,Claude-3-Haiku-20240307 (zero shot),0.286,2%
+88,ForecastBench,Naive Forecaster,0.29,0%
+89,Anthropic,Claude-3-Haiku-20240307 (superforecaster with news 1),0.297,0%
+90,ForecastBench,Random Uniform,0.32,0%
+91,ForecastBench,Always 0,0.339,0%
+92,OpenAI,GPT-3.5-Turbo-0125 (zero shot),0.413,0%
+93,ForecastBench,Always 1,0.661,0%

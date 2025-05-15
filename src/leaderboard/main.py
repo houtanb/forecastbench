@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from multiprocessing import Pool
 
 import numpy as np
@@ -183,7 +183,7 @@ def make_and_upload_html_table(df, title, basename):
             "organization": "Organization",
             "model": "Model",
             "data": f"Dataset Score (N={n_data:,})",
-            "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 1 (bootstrapped)",
+            "p-value_pairwise_bootstrap": "Pairwise p-value comparing to No. 6 (bootstrapped)",
             "pct_imputed": "Pct. Imputed",
         }
     )
@@ -348,14 +348,21 @@ def get_pairwise_p_values(df, n_replications):
     df[better_than_super_col_name] = 0.0
 
     # Get best performer
-    best_organization = df.at[0, "organization"]
-    best_model = df.at[0, "model"]
+    best_index = 5
+    best_organization = df.at[best_index, "organization"]
+    best_model = df.at[best_index, "model"]
     logger.info(f"p-value comparison best performer is: {best_organization} {best_model}.")
 
-    df_best = pd.DataFrame(df.at[0, "df"])
-    observed_overall_score_best = df.at[0, "data"]
+    print("BEST")
+    print(best_organization, best_model)
+    print()
+    print()
+    df_best = pd.DataFrame(df.at[best_index, "df"])
+    observed_overall_score_best = df.at[best_index, "data"]
 
-    for index in range(1, len(df)):
+    for index in range(0, len(df)):
+        if index == 5:
+            continue
         df_comparison = pd.DataFrame(df.at[index, "df"])
         observed_overall_score_comparison = df.at[index, "data"]
 
@@ -508,17 +515,7 @@ def worker(task):
 def driver(_):
     """Create new leaderboard."""
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    files = [
-        file
-        for file in files
-        if file.endswith(".json")
-        and (
-            file.startswith("2024-07-21")
-            or file.startswith("2025-03-02")
-            or file.startswith("2025-03-30")
-            or file.startswith("2025-03-16")
-        )
-    ]
+    files = [file for file in files if file.endswith(".json") and (file.startswith("2024-07-21"))]
     files = [file for file in files if "with_freeze_values" not in file]
     directories = sorted(set(file.split("/")[0] for file in files))
     logger.info(f"Have access to {env.NUM_CPUS}.")
@@ -575,24 +572,6 @@ def driver(_):
 
             # Remove Combos
             df = df[~df["id"].apply(resolution.is_combo)]
-
-            # Remove everything resolved after 30 days
-            df = df[df["resolution_date"] <= df["forecast_due_date"] + timedelta(days=30)]
-
-            # Only include forecast rounds that have had both sets of questions resolve
-            res_dates = df["resolution_date"].unique()
-            if len(res_dates) != 2:
-                print(f"NEED 2 RES DATES: {res_dates}")
-                break
-            else:
-                r1, r2 = res_dates[0], res_dates[1]
-                print(
-                    f"{r1}: ",
-                    len(df[df["resolution_date"] == r1]),
-                    f"{r2}: ",
-                    len(df[df["resolution_date"] == r2]),
-                )
-                print()
 
             if not is_human_forecast_set:
                 add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)

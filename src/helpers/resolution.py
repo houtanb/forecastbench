@@ -7,6 +7,7 @@ import pickle
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from typing import Union
 
 import numpy as np
@@ -51,6 +52,28 @@ def split_dataframe_on_source(df, source):
     return df[mask].copy(), df[~mask].copy()
 
 
+def get_market_resolution_date(row):
+    """Return the minimum of the market close date and the resolution date.
+
+    This is used to create the resolution file. What we care about is when the market closed or, if
+    resolution happened before the close date, then the resolution date.
+    """
+
+    def to_date_or_max(s):
+        """Convert a string representation of a date to a date.
+
+        If not able to convert, e.g. "N/A" is passed, return the max date.
+        """
+        try:
+            return dates.convert_zulu_to_datetime(s).date()
+        except (ValueError, TypeError):
+            return date.max
+
+    close_date = to_date_or_max(row["market_info_close_datetime"].iloc[0])
+    resolution_date = to_date_or_max(row["market_info_resolution_datetime"].iloc[0])
+    return min(close_date, resolution_date)
+
+
 def is_combo(row):
     """Tell whether or not id is a combo question."""
     if isinstance(row, pd.Series) and "id" in row.index:
@@ -92,6 +115,75 @@ def is_combo_question_resolved(is_resolved0, is_resolved1, dir0, dir1, resolved_
             direction=dir1,
             resolved_to=resolved_to1,
         )
+    )
+
+
+def get_combo_question_resolution_date(
+    is_resolved0,
+    is_resolved1,
+    dir0,
+    dir1,
+    resolved_to0,
+    resolved_to1,
+    resolution_date0,
+    resolution_date1,
+):
+    """Determine when a combo forecast question is resolved based on two sub-questions."""
+    if not is_resolved0 and not is_resolved1:
+        return None
+
+    def same_dir(is_resolved, direction, resolved_to):
+        return bool(
+            is_resolved
+            and ((direction == 1 and resolved_to == 1) or (direction == -1 and resolved_to == 0))
+        )
+
+    def diff_dir(is_resolved, direction, resolved_to):
+        return bool(
+            is_resolved
+            and ((direction == 1 and resolved_to == 0) or (direction == -1 and resolved_to == 1))
+        )
+
+    zero_same_dir = same_dir(is_resolved0, dir0, resolved_to0)
+    zero_diff_dir = diff_dir(is_resolved0, dir0, resolved_to0)
+    one_same_dir = same_dir(is_resolved1, dir1, resolved_to1)
+    one_diff_dir = diff_dir(is_resolved1, dir1, resolved_to1)
+
+    if np.isnan(resolved_to0) and np.isnan(resolved_to1):
+        return min(resolution_date0, resolution_date1)
+    elif np.isnan(resolved_to0):
+        if one_diff_dir:
+            return min(resolution_date0, resolution_date1)
+        else:
+            return resolution_date0
+    elif np.isnan(resolved_to1):
+        if zero_diff_dir:
+            return min(resolution_date0, resolution_date1)
+        else:
+            return resolution_date1
+
+    if zero_same_dir and one_same_dir:
+        return max(resolution_date0, resolution_date1)
+
+    if zero_same_dir and one_diff_dir:
+        return resolution_date1
+
+    if zero_diff_dir and one_same_dir:
+        return resolution_date0
+
+    if zero_diff_dir and one_diff_dir:
+        return min(resolution_date0, resolution_date1)
+
+    if not is_resolved0 and one_diff_dir:
+        return resolution_date1
+
+    if is_resolved0 and not one_diff_dir:
+        return resolution_date0
+
+    raise ValueError(
+        "Combo question should have a resolution date:"
+        f"{(zero_same_dir, zero_diff_dir, is_resolved0, dir0, resolved_to0)}\n"
+        f"{(one_same_dir, one_diff_dir, is_resolved1, dir1, resolved_to1)}\n"
     )
 
 

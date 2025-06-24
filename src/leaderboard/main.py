@@ -58,6 +58,9 @@ def download_and_read_processed_forecast_file(filename):
 
 def get_leaderboard_entry(df):
     """Create the leaderboard entry for the given dataframe."""
+    # Remove combo
+    df = df[~df["id"].apply(resolution.is_combo)]
+
     # Masks
     data_mask = df["source"].isin(question_curation.DATA_SOURCES)
     market_mask = df["source"].isin(question_curation.MARKET_SOURCES)
@@ -75,8 +78,8 @@ def get_leaderboard_entry(df):
 
     # Markets
     market_resolved_score, n_market_resolved = get_scores(df, market_mask & resolved_mask)
-    market_unresolved_score, n_market_unresolved = get_scores(df, market_mask & unresolved_mask)
-    market_overall_score, n_market_overall = get_scores(df, market_mask)
+    market_unresolved_score, n_market_unresolved = get_scores(df, market_mask & resolved_mask)
+    market_overall_score, n_market_overall = get_scores(df, market_mask & resolved_mask)
     market_overall_std_dev = df[market_mask]["score"].std(ddof=1)
     market_overall_se = market_overall_std_dev / np.sqrt(n_market_overall)
 
@@ -98,7 +101,7 @@ def get_leaderboard_entry(df):
         LEADERBOARD_DECIMAL_PLACES,
     )
 
-    df = df[(data_mask & resolved_mask) | market_mask].sort_values(
+    df = df[(data_mask & resolved_mask) | (market_mask & resolved_mask)].sort_values(
         by=[
             "source",
             "id",
@@ -982,7 +985,8 @@ def driver(_):
     llm_and_human_leaderboard = {}
     llm_and_human_combo_leaderboard = {}
     files = gcp.storage.list(env.PROCESSED_FORECAST_SETS_BUCKET)
-    files = [file for file in files if file.endswith(".json")]
+    files = [file for file in files if file.endswith(".json") and file.startswith("2024")]
+
     logger.info(f"Have access to {env.NUM_CPUS}.")
     for f in files:
         logger.info(f"Downloading, reading, and scoring forecasts in `{f}`...")
@@ -1026,24 +1030,10 @@ def driver(_):
         is_human_forecast_set = (
             org_and_model == SUPERFORECASTER_MODEL or org_and_model == GENERAL_PUBLIC_MODEL
         )
-        if not is_human_forecast_set:
-            add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)
-        add_to_llm_and_human_leaderboard(
-            llm_and_human_leaderboard,
-            org_and_model,
-            df,
-            forecast_due_date,
-            cache,
-        )
+        if is_human_forecast_set:
+            continue
 
-        add_to_llm_and_human_combo_leaderboards(
-            llm_and_human_combo_leaderboard,
-            org_and_model,
-            df,
-            forecast_due_date,
-            cache,
-            is_human_forecast_set,
-        )
+        add_to_llm_leaderboard(llm_leaderboard, org_and_model, df, forecast_due_date)
 
     def get_z_score(df):
         # mask = (df["organization"] == BASELINE_ORG_MODEL["organization"]) & (
@@ -1060,16 +1050,6 @@ def driver(_):
             "d": llm_leaderboard["overall"],
             "title": title,
             "basename": "leaderboard_overall",
-        },
-        {
-            "d": llm_and_human_leaderboard["overall"],
-            "title": f"Human {title}",
-            "basename": "human_leaderboard_overall",
-        },
-        {
-            "d": llm_and_human_combo_leaderboard["overall"],
-            "title": f"Human Combo {title}",
-            "basename": "human_combo_leaderboard_overall",
         },
     ]
 

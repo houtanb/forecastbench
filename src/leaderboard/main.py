@@ -47,7 +47,12 @@ IMPUTED_CUTOFF_PCT = 5
 
 MIN_DAYS_BEFORE_QUESTION_SET_IS_INCLUDED = 90
 
+MODEL_RELEASE_DATE_CUTOFF = 365
+
 N_REPLICATES = 1999 if not env.RUNNING_LOCALLY else 2
+
+df_release_dates = pd.read_csv("model_release_dates.csv")
+df_release_dates["release_date"] = pd.to_datetime(df_release_dates["release_date"], errors="coerce")
 
 
 def download_and_read_processed_forecast_file(filename: str) -> Dict[str, Any]:
@@ -627,7 +632,30 @@ def two_way_fixed_effects(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     orig_cols = df.columns.tolist()
-    mod = pf.feols("brier_score ~ 1 | question_pk + model_pk", data=df)
+
+    # Drop models that were released more than `MODEL_RELEASE_DATE_CUTOFF` days ago. Also drop some
+    # dummy ForecastBench models
+    df_fe = pd.merge(
+        df,
+        df_release_dates,
+        how="inner",
+        on="model",
+    )
+    date_mask = (
+        pd.to_datetime(df_fe["forecast_due_date"]) - pd.to_datetime(df_fe["release_date"])
+    ).dt.days < MODEL_RELEASE_DATE_CUTOFF
+    drop_benchmark_models = [
+        "Always 0",
+        "Always 1",
+        "Always 0.5",
+        "Random Uniform",
+    ]
+    benchmark_mask = (df_fe["organization"] == constants.BENCHMARK_NAME) & (
+        ~df_fe["model"].isin(drop_benchmark_models)
+    )
+    df_fe = df_fe[(date_mask | benchmark_mask)].reset_index(drop=True)
+
+    mod = pf.feols("brier_score ~ 1 | question_pk + model_pk", data=df_fe)
     dict_question_fe = mod.fixef()["C(question_pk)"]
     if len(dict_question_fe) != len(df["question_pk"].unique()):
         raise ValueError(

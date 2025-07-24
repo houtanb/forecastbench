@@ -548,7 +548,8 @@ def write_leaderboard(
         ),
         col_desc_ci="Bootstrapped 95% confidence interval for the Overall score.",
         col_desc_p_val=(
-            "One-sided p-value comparing every model to the top-ranked model, with<br>"
+            "One-sided p-value comparing each model to the top-ranked model based on "
+            f"{N_REPLICATES:,} simulations, with<br>"
             "H₀: This model performs at least as well as the top-ranked model.<br>"
             "H₁: The top-ranked model outperforms this model."
         ),

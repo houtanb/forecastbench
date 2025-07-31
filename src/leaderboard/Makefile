@@ -30,11 +30,13 @@ deploy : main.py requirements.txt Dockerfile model_release_dates.csv
 		--tasks 1 \
 		--parallelism 1 \
 		--task-timeout 1h \
-		--memory 8Gi \
+		--memory 16Gi \
 		--cpu $(NUM_CPUS) \
 		--max-retries 0 \
 		--add-volume name=$(PROCESSED_FORECAST_SETS_BUCKET),type=cloud-storage,bucket=$(PROCESSED_FORECAST_SETS_BUCKET),readonly=true \
 		--add-volume-mount volume=$(PROCESSED_FORECAST_SETS_BUCKET),mount-path=$(BUCKET_MOUNT_POINT)/$(PROCESSED_FORECAST_SETS_BUCKET) \
+		--add-volume name=$(WORKSPACE_BUCKET),type=cloud-storage,bucket=$(WORKSPACE_BUCKET),readonly=false \
+		--add-volume-mount volume=$(WORKSPACE_BUCKET),mount-path=$(BUCKET_MOUNT_POINT)/$(WORKSPACE_BUCKET) \
 		--add-volume name=$(WORKSPACE_BUCKET),type=cloud-storage,bucket=$(WORKSPACE_BUCKET),readonly=false \
 		--add-volume-mount volume=$(WORKSPACE_BUCKET),mount-path=$(BUCKET_MOUNT_POINT)/$(WORKSPACE_BUCKET) \
 		--service-account $(QUESTION_BANK_BUCKET_SERVICE_ACCOUNT) \

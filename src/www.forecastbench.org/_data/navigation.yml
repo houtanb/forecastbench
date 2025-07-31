@@ -1,0 +1,10 @@
+main:
+  - title: "Leaderboard"
+    url: "/leaderboard/"
+    icon: "fa-solid fa-trophy"
+  - title: "Datasets"
+    url: "/datasets/"
+    icon: "fa-solid fa-table"
+  - title: "Paper"
+    url: "/paper/"
+    icon: "fa-regular fa-file"

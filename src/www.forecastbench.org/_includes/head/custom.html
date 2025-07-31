@@ -1,0 +1,16 @@
+<!-- start custom head snippets -->
+{% if page.head_css %}
+  {% for script in page.head_css %}
+    <link rel="stylesheet" href="{{ script | relative_url }}">
+  {% endfor %}
+{% endif %}
+
+{% if page.head_scripts %}
+  {% for script in page.head_scripts %}
+    <script src="{{ script | relative_url }}"></script>
+  {% endfor %}
+{% endif %}
+
+<!-- insert favicons. use https://realfavicongenerator.net/ -->
+
+<!-- end custom head snippets -->

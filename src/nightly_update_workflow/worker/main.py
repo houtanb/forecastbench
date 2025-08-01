@@ -21,7 +21,7 @@ resolve_and_leaderboard = [
 
 website = [
     [
-        ("func-website", True, cloud_run.timeout_1h, 1),
+        ("func-website", True, cloud_run.timeout_1h * 0.5, 1),
     ]
 ]
 

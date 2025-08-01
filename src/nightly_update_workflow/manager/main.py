@@ -129,7 +129,7 @@ def main():
     operation_resolve_and_leaderboard = call_worker(
         dict_to_use=dict_to_use_resolve_and_leaderboard,
         task_count=1,
-        timeout=cloud_run.timeout_1h * 3,
+        timeout=cloud_run.timeout_1h * 4,
     )
 
     dict_to_use_metadata = "metadata"

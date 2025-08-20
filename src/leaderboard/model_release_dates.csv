@@ -2,17 +2,18 @@ model,release_date
 Always 0,
 Always 0.5,
 Always 1,
+Claude-2.1 (scratchpad with news with freeze values),2023-11-21
 Claude-2.1 (zero shot with freeze values),2023-11-21
 Claude-2.1 (zero shot),2023-11-21
-Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),2024-06-21
-Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),2024-06-21
-Claude-3-5-Sonnet-20240620 (scratchpad with news),2024-06-21
-Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),2024-06-21
-Claude-3-5-Sonnet-20240620 (scratchpad),2024-06-21
-Claude-3-5-Sonnet-20240620 (superforecaster with news 2),2024-06-21
-Claude-3-5-Sonnet-20240620 (superforecaster with news 3),2024-06-21
-Claude-3-5-Sonnet-20240620 (zero shot with freeze values),2024-06-21
-Claude-3-5-Sonnet-20240620 (zero shot),2024-06-21
+Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),2024-06-20
+Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),2024-06-20
+Claude-3-5-Sonnet-20240620 (scratchpad with news),2024-06-20
+Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),2024-06-20
+Claude-3-5-Sonnet-20240620 (scratchpad),2024-06-20
+Claude-3-5-Sonnet-20240620 (superforecaster with news 2),2024-06-20
+Claude-3-5-Sonnet-20240620 (superforecaster with news 3),2024-06-20
+Claude-3-5-Sonnet-20240620 (zero shot with freeze values),2024-06-20
+Claude-3-5-Sonnet-20240620 (zero shot),2024-06-20
 Claude-3-5-Sonnet-20241022 (scratchpad with freeze values),2024-10-22
 Claude-3-5-Sonnet-20241022 (scratchpad),2024-10-22
 Claude-3-5-Sonnet-20241022 (zero shot with freeze values),2024-10-22
@@ -56,14 +57,18 @@ Gemini-2.0-Flash-Lite-001 (scratchpad with freeze values),2025-02-05
 Gemini-2.0-Flash-Lite-001 (scratchpad),2025-02-05
 Gemini-2.0-Flash-Lite-001 (zero shot with freeze values),2025-02-05
 Gemini-2.0-Flash-Lite-001 (zero shot),2025-02-05
-GPT-3.5-Turbo-0125 (scratchpad with freeze values),2023-03-21
-GPT-3.5-Turbo-0125 (scratchpad),2023-03-21
-GPT-3.5-Turbo-0125 (zero shot with freeze values),2023-03-21
-GPT-3.5-Turbo-0125 (zero shot),2023-03-21
-GPT-4 (scratchpad with freeze values),2023-06-13
-GPT-4 (scratchpad),2023-06-13
-GPT-4 (zero shot with freeze values),2023-06-13
-GPT-4 (zero shot),2023-06-13
+Gemini-2.5-Flash-Preview-04-17 (scratchpad with freeze values),2025-04-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad),2025-04-17
+Gemini-2.5-Flash-Preview-04-17 (zero shot with freeze values),2025-04-17
+Gemini-2.5-Flash-Preview-04-17 (zero shot),2025-04-17
+GPT-3.5-Turbo-0125 (scratchpad with freeze values),2024-01-25
+GPT-3.5-Turbo-0125 (scratchpad),2024-01-25
+GPT-3.5-Turbo-0125 (zero shot with freeze values),2024-01-25
+GPT-3.5-Turbo-0125 (zero shot),2024-01-25
+GPT-4 (scratchpad with freeze values),2023-03-14
+GPT-4 (scratchpad),2023-03-14
+GPT-4 (zero shot with freeze values),2023-03-14
+GPT-4 (zero shot),2023-03-14
 GPT-4-Turbo-2024-04-09 (scratchpad with freeze values),2024-04-09
 GPT-4-Turbo-2024-04-09 (scratchpad with news with freeze values),2024-04-09
 GPT-4-Turbo-2024-04-09 (scratchpad with news),2024-04-09
@@ -71,6 +76,10 @@ GPT-4-Turbo-2024-04-09 (scratchpad),2024-04-09
 GPT-4-Turbo-2024-04-09 (superforecaster with news 1),2024-04-09
 GPT-4-Turbo-2024-04-09 (zero shot with freeze values),2024-04-09
 GPT-4-Turbo-2024-04-09 (zero shot),2024-04-09
+GPT-4.1-2025-04-14 (scratchpad with freeze values),2025-04-14
+GPT-4.1-2025-04-14 (scratchpad),2025-04-14
+GPT-4.1-2025-04-14 (zero shot with freeze values),2025-04-14
+GPT-4.1-2025-04-14 (zero shot),2025-04-14
 GPT-4.5-Preview-2025-02-27 (scratchpad with freeze values),2025-02-27
 GPT-4.5-Preview-2025-02-27 (scratchpad),2025-02-27
 GPT-4.5-Preview-2025-02-27 (zero shot with freeze values),2025-02-27
@@ -90,6 +99,10 @@ GPT-4o-2024-11-20 (zero shot with freeze values with web search),2024-11-20
 GPT-4o-2024-11-20 (zero shot with web search),2024-11-20
 Grok-2-1212 (zero shot with freeze values),2024-12-12
 Grok-2-1212 (zero shot),2024-12-12
+Grok-3-Beta (zero shot with freeze values),2025-02-17
+Grok-3-Beta (zero shot),2025-02-17
+Grok-3-Mini-Beta (zero shot with freeze values),2025-02-17
+Grok-3-Mini-Beta (zero shot),2025-02-17
 Imputed Forecaster,
 Llama-2-70b-Chat-Hf (scratchpad with freeze values),2023-07-18
 Llama-2-70b-Chat-Hf (scratchpad),2023-07-18
@@ -107,6 +120,8 @@ Llama-3.3-70B-Instruct-Turbo (scratchpad with freeze values),2024-12-06
 Llama-3.3-70B-Instruct-Turbo (scratchpad),2024-12-06
 Llama-3.3-70B-Instruct-Turbo (zero shot with freeze values),2024-12-06
 Llama-3.3-70B-Instruct-Turbo (zero shot),2024-12-06
+Llama-4-Scout-17B-16E-Instruct (zero shot with freeze values),2025-04-05
+Llama-4-Scout-17B-16E-Instruct (zero shot),2025-04-05
 "LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",
 "LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",
 "LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",
@@ -126,14 +141,20 @@ Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),2024-04-17
 Mixtral-8x22B-Instruct-V0.1 (zero shot with freeze values),2024-04-01
 Mixtral-8x22B-Instruct-V0.1 (zero shot),2024-04-17
 Mixtral-8x7B-Instruct-V0.1 (scratchpad with freeze values),2023-12-11
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news with freeze values),2023-12-11
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),2023-12-11
 Mixtral-8x7B-Instruct-V0.1 (scratchpad),2023-12-11
 Mixtral-8x7B-Instruct-V0.1 (zero shot with freeze values),2023-12-11
 Mixtral-8x7B-Instruct-V0.1 (zero shot),2023-12-11
 Naive Forecaster,
-O3-Mini-2025-01-31 (scratchpad with freeze values),2025-01-30
-O3-Mini-2025-01-31 (scratchpad),2025-01-30
-O3-Mini-2025-01-31 (zero shot with freeze values),2025-01-30
-O3-Mini-2025-01-31 (zero shot),2025-01-30
+O3-2025-04-16 (scratchpad with freeze values),2025-04-16
+O3-2025-04-16 (scratchpad),2025-04-16
+O3-2025-04-16 (zero shot with freeze values),2025-04-16
+O3-2025-04-16 (zero shot),2025-04-16
+O3-Mini-2025-01-31 (scratchpad with freeze values),2025-01-31
+O3-Mini-2025-01-31 (scratchpad),2025-01-31
+O3-Mini-2025-01-31 (zero shot with freeze values),2025-01-31
+O3-Mini-2025-01-31 (zero shot),2025-01-31
 Public median forecast,
 Qwen1.5-110B-Chat (scratchpad with freeze values),2024-04-25
 Qwen1.5-110B-Chat (scratchpad with news with freeze values),2024-04-25

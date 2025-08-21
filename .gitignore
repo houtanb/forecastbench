@@ -80,3 +80,7 @@ Thumbs.db
 *.rar
 *.tar
 *.zip
+
+# Exceptions for SOTA graph files
+!src/www.forecastbench.org/sota_graph/sota_graph.html
+!src/www.forecastbench.org/sota_graph/sota_graph.csv

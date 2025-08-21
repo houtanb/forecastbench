@@ -88,6 +88,12 @@
 
   const fmt = d3.format('.3f');
   const fmtDate = d3.timeFormat('%Y-%m-%d');
+  // Format with 3 decimals; if that would display as 0.000, use 4 decimals
+  const fmt3or4 = (v) => {
+    const s3 = fmt(v);
+    if (s3 === '0.000' || s3 === '-0.000') return d3.format('.4f')(v);
+    return s3;
+  };
 
   const dropEl = document.getElementById('drop');
   const tip = d3.select('#tip');
@@ -250,55 +256,69 @@
     // SOTA error bars with horizontal caps
     const sota = data.filter(d => d.is_sota_at_release);
     
-    // Calculate linear regression for SOTA models
-    function calculateRegression(sotaData) {
+    // Calculate linear regression for SOTA models using months since first SOTA
+    function calculateRegressionMonthsSinceFirst(sotaData) {
       const n = sotaData.length;
       if (n < 2) return null;
-      
-      // Convert dates to numeric values (days since epoch)
-      const xVals = sotaData.map(d => d.release_date.getTime());
+      const firstDate = d3.min(sotaData, d => d.release_date);
+      // x = months since first SOTA model; months ~= days/30
+      const xVals = sotaData.map(d => (d.release_date - firstDate) / (1000 * 60 * 60 * 24 * 30));
       const yVals = sotaData.map(d => d.overall_score);
-      
       const xMean = d3.mean(xVals);
       const yMean = d3.mean(yVals);
-      
       let numerator = 0;
       let denominator = 0;
-      
       for (let i = 0; i < n; i++) {
         const xDiff = xVals[i] - xMean;
         const yDiff = yVals[i] - yMean;
         numerator += xDiff * yDiff;
         denominator += xDiff * xDiff;
       }
-      
-      const slope = numerator / denominator;
-      const intercept = yMean - slope * xMean;
-      
-      return { slope, intercept };
+      const slopePerMonth = numerator / denominator; // b
+      const interceptAtMonth0 = yMean - slopePerMonth * xMean; // a
+      return { a: interceptAtMonth0, b: slopePerMonth, firstDate, n };
     }
     
-    const regression = calculateRegression(sota);
+    const regression = calculateRegressionMonthsSinceFirst(sota);
     
-    // Add regression trend line if we have enough SOTA points
+    // Add regression trend line and hover area + tooltip
     if (regression && sota.length >= 2) {
-      const firstSotaDate = d3.min(sota, d => d.release_date);
-      // End trend at most recent model date in the dataset (SOTA or not)
-      const trendData = [firstSotaDate, maxDate].map(date => ({
-        x: date,
-        y: regression.slope * date.getTime() + regression.intercept
-      }));
+      const firstSotaDate = regression.firstDate;
+      const lastDate = maxDate;
+      // Compute y along the line using months since first SOTA
+      function yOnTrend(date){
+        const months = (date - firstSotaDate) / (1000 * 60 * 60 * 24 * 30);
+        return regression.a + regression.b * months;
+      }
+      const yStart = yOnTrend(firstSotaDate);
+      const yEnd = yOnTrend(lastDate);
       
-      g.append('line')
+      // Visible trend line
+      const trendLine = g.append('line')
         .attr('class', 'trend-line')
-        .attr('x1', x(trendData[0].x))
-        .attr('y1', y(trendData[0].y))
-        .attr('x2', x(trendData[1].x))
-        .attr('y2', y(trendData[1].y))
+        .attr('x1', x(firstSotaDate))
+        .attr('y1', y(yStart))
+        .attr('x2', x(lastDate))
+        .attr('y2', y(yEnd))
         .style('stroke', 'var(--sota-sota)')
         .style('stroke-width', '2')
         .style('stroke-dasharray', '8,4')
         .style('opacity', '0.7');
+
+      // Add wider invisible hit area for tooltip interactions
+      const trendHit = g.append('line')
+        .attr('x1', x(firstSotaDate))
+        .attr('y1', y(yStart))
+        .attr('x2', x(lastDate))
+        .attr('y2', y(yEnd))
+        .attr('stroke', 'transparent')
+        .attr('stroke-width', 14)
+        .style('cursor', 'pointer')
+        .on('mouseenter', (ev) => {
+          const html = trendTooltipHTML(regression);
+          tipOn(ev, html);
+        })
+        .on('mouseleave', tipOff);
     }
     
     if (showErrorBars) {
@@ -490,6 +510,21 @@
       }
       
       return html;
+    }
+
+    // Tooltip for the trend line
+    function trendTooltipHTML(reg) {
+      const a = reg.a;
+      const b = reg.b;
+      const n = reg.n;
+      // Use consistent formatting for numbers
+      const aStr = fmt3or4(a);
+      const bStr = fmt3or4(b);
+      return `
+        <div><strong>Linear Trend, SOTA Models</strong></div>
+        <div>Formula = ${aStr} + (${bStr}) * (months since first model)</div>
+        <div>Number of SOTA models: ${n}</div>
+      `;
     }
   }
 

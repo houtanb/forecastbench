@@ -93,6 +93,11 @@
       [/gpt-4-turbo/i, 'GPT-4 Turbo'],
       [/gpt-4/i, 'GPT-4'],
       [/gpt-3\.5/i, 'GPT-3.5'],
+      [/claude-(\d+(?:-\d+)?)-?(sonnet|opus|haiku)/i, (_,v,variant)=> {
+        const version = v.replace('-', '.');
+        const variantName = variant.charAt(0).toUpperCase() + variant.slice(1).toLowerCase();
+        return `Claude ${version} ${variantName}`;
+      }],
       [/claude-?(\d(?:\.\d)?)?/i, (_,v)=> v?`Claude ${v}`:'Claude'],
       [/gemini-?(\d(?:\.\d)?)?/i, (_,v)=> v?`Gemini ${v}`:'Gemini'],
       [/llama-?(\d(?:\.\d)?)?/i,  (_,v)=> v?`Llama ${v}`:'Llama'],
@@ -307,7 +312,7 @@
     const labels = sg.selectAll('text.lab').data(sota).join('text')
       .attr('class','lab')
       .attr('x', d => x(d.release_date))
-      .attr('y', d => y(d.overall_score) + 18)
+      .attr('y', d => y(d.conf_int_lb) + 20)
       .text(d => shortLabel(d.model));
 
     const nodes = labels.nodes()

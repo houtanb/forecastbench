@@ -24,16 +24,17 @@
   html, body { margin:0; padding:0; background:var(--sota-bg); color:var(--sota-text); font-family:var(--sota-font); }
   .wrap { max-width: 1100px; margin: 24px auto 40px auto; padding: 0 16px; }
   h1 { font-size: 20px; margin: 0 0 6px 0; font-weight: 650; }
-  .sub { color: #6b7280; font-size: 13px; margin-bottom: 12px; }
+  .sub { color: var(--sota-text); font-size: 13px; margin-bottom: 12px; }
+  select, option { color: var(--sota-text); }
 
   /* SVG styles */
   .grid line { stroke: var(--sota-grid); stroke-width: 1; }
   .axis path, .axis line { stroke: var(--sota-axes); stroke-width: 1; shape-rendering: crispEdges; }
-  .axis text { fill: var(--sota-axes); font-size: 12px; }
-  .ylabel, .xlabel { fill: var(--sota-axes); font-size: 12px; }
+  .axis text { fill: var(--sota-text); font-size: 12px; }
+  .ylabel, .xlabel { fill: var(--sota-text); font-size: 12px; }
 
-  .refline { stroke: var(--sota-ref-line); stroke-width: 1; stroke-dasharray: 4 4; }
-  .reflabel { fill: var(--sota-ref); font-size: 12px; }
+  .refline { stroke: var(--sota-text); stroke-width: 1; stroke-dasharray: 4 4; }
+  .reflabel { fill: var(--sota-text); font-size: 12px; }
   .trend-line { stroke: var(--sota-sota); stroke-width: 2; stroke-dasharray: 8,4; opacity: 0.7; }
   .legend-text { fill: var(--sota-text); font-size: 11px; }
 
@@ -52,10 +53,10 @@
   /* Drag & drop fallback UI when local file fetch is blocked */
   .drop {
     display:none; margin-top: 10px; border: 1.5px dashed #cbd5e1; border-radius: 10px;
-    padding: 14px; color:#475569; font-size: 13px; text-align:center;
+    padding: 14px; color: var(--sota-text); font-size: 13px; text-align:center;
   }
   .drop.show { display:block; }
-  .drop strong { color:#0f172a; }
+  .drop strong { color: var(--sota-text); }
 </style>
 </head>
 <body>
@@ -161,7 +162,7 @@
 
     // Extend x-axis domain by 1 month on each side
     const [minDate, maxDate] = d3.extent(data, d => d.release_date);
-    const extendedMinDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, minDate.getDate());
+    const extendedMinDate = new Date(minDate.getFullYear(), minDate.getMonth() - 2, minDate.getDate());
     const extendedMaxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, maxDate.getDate());
     
     const x = d3.scaleTime()
@@ -278,8 +279,9 @@
     
     // Add regression trend line if we have enough SOTA points
     if (regression && sota.length >= 2) {
-      const xRange = x.domain();
-      const trendData = xRange.map(date => ({
+      const firstSotaDate = d3.min(sota, d => d.release_date);
+      // End trend at most recent model date in the dataset (SOTA or not)
+      const trendData = [firstSotaDate, maxDate].map(date => ({
         x: date,
         y: regression.slope * date.getTime() + regression.intercept
       }));
@@ -398,11 +400,13 @@
 
     function tooltipHTML(d){
       const hasCI = Number.isFinite(d.conf_int_lb) && Number.isFinite(d.conf_int_ub);
+      const hasN = Number.isFinite(d.sample_size);
       return `
         <div><strong>${d.model}</strong></div>
         <div>Release Date: ${fmtDate(d.release_date)}</div>
         <div>Diff-Adj. Brier: ${fmt(d.overall_score)}</div>
         ${hasCI ? `<div>95% CI: [${fmt(d.conf_int_lb)}, ${fmt(d.conf_int_ub)}]</div>` : ''}
+        ${hasN ? `<div>Sample Size: ${d.sample_size}</div>` : ''}
       `;
     }
     
@@ -413,21 +417,33 @@
         title = 'Always Predict 0.5';
       } else if (label === 'Public') {
         title = 'Public Median Forecast';
-        // Get CI from original CSV data
+        // Get CI from original CSV data, but only show for 'overall'
         const publicRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        if (publicRow) {
-          lb = +publicRow.conf_int_lb;
-          ub = +publicRow.conf_int_ub;
-          hasCI = Number.isFinite(lb) && Number.isFinite(ub);
+        if (publicRow && baselineType === 'overall') {
+          const lbRaw = publicRow.conf_int_lb;
+          const ubRaw = publicRow.conf_int_ub;
+          const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
+          const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
+          if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
+            lb = lbNum;
+            ub = ubNum;
+            hasCI = true;
+          }
         }
       } else if (label === 'Superforecaster') {
         title = 'Superforecaster Median Forecast';
-        // Get CI from original CSV data  
+        // Get CI from original CSV data, but only show for 'overall'
         const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        if (superRow) {
-          lb = +superRow.conf_int_lb;
-          ub = +superRow.conf_int_ub;
-          hasCI = Number.isFinite(lb) && Number.isFinite(ub);
+        if (superRow && baselineType === 'overall') {
+          const lbRaw = superRow.conf_int_lb;
+          const ubRaw = superRow.conf_int_ub;
+          const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
+          const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
+          if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
+            lb = lbNum;
+            ub = ubNum;
+            hasCI = true;
+          }
         }
       }
       
@@ -463,7 +479,8 @@
       overall_score: +d.diff_adj_brier,
       release_date: new Date(d.release_date),
       conf_int_lb: toNumOrNaN(d.conf_int_lb),
-      conf_int_ub: toNumOrNaN(d.conf_int_ub)
+      conf_int_ub: toNumOrNaN(d.conf_int_ub),
+      sample_size: toNumOrNaN(d.sample_size)
     }));
     
     const baselines = {};

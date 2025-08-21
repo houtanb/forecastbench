@@ -395,7 +395,7 @@
       } else if (label === 'Public') {
         title = 'Public Median Forecast';
         // Get CI from original CSV data
-        const publicRow = originalRows.find(d => d.model === 'Public median forecast');
+        const publicRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === 'overall');
         if (publicRow) {
           hasCI = true;
           lb = +publicRow.conf_int_lb;
@@ -404,7 +404,7 @@
       } else if (label === 'Superforecaster') {
         title = 'Superforecaster Median Forecast';
         // Get CI from original CSV data  
-        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast');
+        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === 'overall');
         if (superRow) {
           hasCI = true;
           lb = +superRow.conf_int_lb;
@@ -431,16 +431,20 @@
   function parseRows(rows){
     originalRows = rows; // Store for tooltip access
     
-    // Extract baseline values from CSV for reference lines
-    const superforecasterRow = rows.find(d => d.model === 'Superforecaster median forecast');
-    const publicRow = rows.find(d => d.model === 'Public median forecast');
+    // Only use overall rows for plotting and baselines
+    const isOverall = d => (d.type || '').trim().toLowerCase() === 'overall';
     
-    // Filter out rows with empty release dates (these are baselines, not temporal models)
-    const filtered = rows.filter(d => d.release_date && d.release_date.trim() !== '');
+    // Extract baseline values from CSV for reference lines (overall type only)
+    const superforecasterRow = rows.find(d => d.model === 'Superforecaster median forecast' && isOverall(d));
+    const publicRow = rows.find(d => d.model === 'Public median forecast' && isOverall(d));
+    
+    // Keep only overall rows with non-empty release dates
+    const overallRows = rows.filter(d => isOverall(d));
+    const filtered = overallRows.filter(d => d.release_date && d.release_date.trim() !== '');
     
     const parsed = filtered.map(d => ({
       model: d.model,
-      overall_score: +d.overall_score,
+      overall_score: +d.diff_adj_brier,
       release_date: new Date(d.release_date),
       conf_int_lb: +d.conf_int_lb,
       conf_int_ub: +d.conf_int_ub
@@ -449,10 +453,10 @@
     // Extract baseline scores for reference lines (only if available)
     const baselines = {};
     if (superforecasterRow) {
-      baselines.superforecaster = +superforecasterRow.overall_score;
+      baselines.superforecaster = +superforecasterRow.diff_adj_brier;
     }
     if (publicRow) {
-      baselines.public = +publicRow.overall_score;
+      baselines.public = +publicRow.diff_adj_brier;
     }
     
     markSOTA(parsed);

@@ -62,6 +62,14 @@
 <div class="wrap">
   <h1>State-of-the-Art LLMs: Improvement Over Time</h1>
   <div class="sub">Difficulty-Adjusted Brier (lower is better)</div>
+  <div style="display:flex; align-items:center; gap:8px; margin: 8px 0 12px 0;">
+    <div class="sub" style="margin:0;">Question Source</div>
+    <select id="typeSelect" style="padding:4px 8px; font-size:13px;">
+      <option value="overall" selected>All</option>
+      <option value="dataset">Dataset</option>
+      <option value="market">Market</option>
+    </select>
+  </div>
   <div id="chart"></div>
   <div id="drop" class="drop">Couldn’t auto-load <strong>sota_graph.csv</strong> (some browsers block local file reads).<br>
     Drag & drop your <strong>sota_graph.csv</strong> here, or run <code>python -m http.server</code> in this folder and refresh.
@@ -114,18 +122,26 @@
     return base.split(/[-_ ]+/).slice(0,2).join(' ').slice(0,18);
   }
 
-  // --- Compute SOTA-at-release flag from the 5 columns ---
+  // --- Compute SOTA-at-release flag; constrain to at most one SOTA per day ---
   function markSOTA(rows){
     rows.sort((a,b)=> d3.ascending(a.release_date,b.release_date));
+    const pad = n => String(n).padStart(2,'0');
+    const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const byDate = d3.group(rows, r => dateKey(r.release_date));
     let best = Infinity, tol = 1e-12;
-    for (const r of rows){
-      r.is_sota_at_release = r.overall_score < best - tol;
-      best = Math.min(best, r.overall_score);
+    for (const [, sameDayRows] of Array.from(byDate).sort((a,b)=> d3.ascending(a[0], b[0]))){
+      sameDayRows.forEach(r => { r.is_sota_at_release = false; });
+      sameDayRows.sort((a,b)=> d3.ascending(a.overall_score, b.overall_score));
+      const bestOfDay = sameDayRows[0]?.overall_score;
+      if (bestOfDay !== undefined && bestOfDay < best - tol){
+        sameDayRows[0].is_sota_at_release = true; // only one per day, the best
+        best = Math.min(best, bestOfDay);
+      }
     }
   }
 
   // --- Main draw ---
-  function draw(data, baselines = {}){
+  function draw(data, baselines = {}, showErrorBars = false, currentType = 'overall'){
     const container = document.getElementById('chart');
     container.innerHTML = '';  // clear for re-render (drag-drop)
     const W = Math.min(container.clientWidth || 1100, 1100);
@@ -205,7 +221,7 @@
          .attr('y', y(r.y) - 8).attr('height', 16)
          .attr('fill', 'transparent')
          .style('cursor', 'pointer')
-         .on('mouseenter', (ev) => tipOn(ev, referenceTooltipHTML(r.label, r.y, baselines)))
+         .on('mouseenter', (ev) => tipOn(ev, referenceTooltipHTML(r.label, r.y, baselines, currentType)))
          .on('mouseleave', tipOff);
       }
     }
@@ -280,23 +296,25 @@
         .style('opacity', '0.7');
     }
     
-    // Vertical line for error bars
-    g.selectAll('.errorbar').data(sota).join('line')
-      .attr('class','errorbar')
-      .attr('x1', d => x(d.release_date)).attr('x2', d => x(d.release_date))
-      .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_ub));
-    
-    // Top horizontal caps
-    g.selectAll('.errorbar-top').data(sota).join('line')
-      .attr('class','errorbar')
-      .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
-      .attr('y1', d => y(d.conf_int_ub)).attr('y2', d => y(d.conf_int_ub));
-    
-    // Bottom horizontal caps
-    g.selectAll('.errorbar-bottom').data(sota).join('line')
-      .attr('class','errorbar')
-      .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
-      .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_lb));
+    if (showErrorBars) {
+      // Vertical line for error bars
+      g.selectAll('.errorbar').data(sota).join('line')
+        .attr('class','errorbar')
+        .attr('x1', d => x(d.release_date)).attr('x2', d => x(d.release_date))
+        .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_ub));
+      
+      // Top horizontal caps
+      g.selectAll('.errorbar-top').data(sota).join('line')
+        .attr('class','errorbar')
+        .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
+        .attr('y1', d => y(d.conf_int_ub)).attr('y2', d => y(d.conf_int_ub));
+      
+      // Bottom horizontal caps
+      g.selectAll('.errorbar-bottom').data(sota).join('line')
+        .attr('class','errorbar')
+        .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
+        .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_lb));
+    }
 
     // SOTA points (same size as non-SOTA, different color only)
     const sg = g.append('g');
@@ -312,7 +330,7 @@
     const labels = sg.selectAll('text.lab').data(sota).join('text')
       .attr('class','lab')
       .attr('x', d => x(d.release_date))
-      .attr('y', d => y(d.conf_int_lb) + 20)
+      .attr('y', d => y(Number.isFinite(d.conf_int_lb) ? d.conf_int_lb : d.overall_score) + 20)
       .text(d => shortLabel(d.model));
 
     const nodes = labels.nodes()
@@ -379,15 +397,16 @@
       .text('Non-SOTA Model');
 
     function tooltipHTML(d){
+      const hasCI = Number.isFinite(d.conf_int_lb) && Number.isFinite(d.conf_int_ub);
       return `
         <div><strong>${d.model}</strong></div>
         <div>Release Date: ${fmtDate(d.release_date)}</div>
         <div>Diff-Adj. Brier: ${fmt(d.overall_score)}</div>
-        <div>95% CI: [${fmt(d.conf_int_lb)}, ${fmt(d.conf_int_ub)}]</div>
+        ${hasCI ? `<div>95% CI: [${fmt(d.conf_int_lb)}, ${fmt(d.conf_int_ub)}]</div>` : ''}
       `;
     }
     
-    function referenceTooltipHTML(label, score, baselines) {
+    function referenceTooltipHTML(label, score, baselines, baselineType) {
       let title, hasCI = false, lb, ub;
       
       if (label === 'Always 0.5') {
@@ -395,20 +414,20 @@
       } else if (label === 'Public') {
         title = 'Public Median Forecast';
         // Get CI from original CSV data
-        const publicRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === 'overall');
+        const publicRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
         if (publicRow) {
-          hasCI = true;
           lb = +publicRow.conf_int_lb;
           ub = +publicRow.conf_int_ub;
+          hasCI = Number.isFinite(lb) && Number.isFinite(ub);
         }
       } else if (label === 'Superforecaster') {
         title = 'Superforecaster Median Forecast';
         // Get CI from original CSV data  
-        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === 'overall');
+        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
         if (superRow) {
-          hasCI = true;
           lb = +superRow.conf_int_lb;
           ub = +superRow.conf_int_ub;
+          hasCI = Number.isFinite(lb) && Number.isFinite(ub);
         }
       }
       
@@ -428,39 +447,40 @@
   // --- Load CSV (auto) with drag-drop fallback for file:// ---
   let originalRows = []; // Store original rows for tooltip access
   
-  function parseRows(rows){
-    originalRows = rows; // Store for tooltip access
+  function renderForType(selectedType){
+    const typeNorm = (selectedType || 'overall').trim().toLowerCase();
+    const isType = d => (d.type || '').trim().toLowerCase() === typeNorm;
     
-    // Only use overall rows for plotting and baselines
-    const isOverall = d => (d.type || '').trim().toLowerCase() === 'overall';
+    // Baselines of the selected type
+    const superforecasterRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && isType(d));
+    const publicRow = originalRows.find(d => d.model === 'Public median forecast' && isType(d));
     
-    // Extract baseline values from CSV for reference lines (overall type only)
-    const superforecasterRow = rows.find(d => d.model === 'Superforecaster median forecast' && isOverall(d));
-    const publicRow = rows.find(d => d.model === 'Public median forecast' && isOverall(d));
-    
-    // Keep only overall rows with non-empty release dates
-    const overallRows = rows.filter(d => isOverall(d));
-    const filtered = overallRows.filter(d => d.release_date && d.release_date.trim() !== '');
-    
+    // Data rows of the selected type with dates
+    const filtered = originalRows.filter(d => isType(d) && d.release_date && d.release_date.trim() !== '');
+    const toNumOrNaN = v => (v === undefined || v === null || String(v).trim() === '') ? NaN : +v;
     const parsed = filtered.map(d => ({
       model: d.model,
       overall_score: +d.diff_adj_brier,
       release_date: new Date(d.release_date),
-      conf_int_lb: +d.conf_int_lb,
-      conf_int_ub: +d.conf_int_ub
+      conf_int_lb: toNumOrNaN(d.conf_int_lb),
+      conf_int_ub: toNumOrNaN(d.conf_int_ub)
     }));
     
-    // Extract baseline scores for reference lines (only if available)
     const baselines = {};
-    if (superforecasterRow) {
-      baselines.superforecaster = +superforecasterRow.diff_adj_brier;
-    }
-    if (publicRow) {
-      baselines.public = +publicRow.diff_adj_brier;
-    }
+    if (superforecasterRow) baselines.superforecaster = +superforecasterRow.diff_adj_brier;
+    if (publicRow) baselines.public = +publicRow.diff_adj_brier;
     
     markSOTA(parsed);
-    draw(parsed, baselines);
+    const showErrorBars = typeNorm === 'overall';
+    draw(parsed, baselines, showErrorBars, typeNorm);
+  }
+  
+  function parseRows(rows){
+    originalRows = rows; // Store for tooltip access
+    // Initialize control to default and render
+    const sel = document.getElementById('typeSelect');
+    const defaultType = (sel && sel.value) ? sel.value : 'overall';
+    renderForType(defaultType);
   }
 
   function tryFetch(){
@@ -490,6 +510,18 @@
     });
   }
 
+  // Bind control change after DOM ready
+  document.addEventListener('DOMContentLoaded', () => {
+    const sel = document.getElementById('typeSelect');
+    if (sel) {
+      sel.addEventListener('change', () => {
+        if (originalRows && originalRows.length) {
+          renderForType(sel.value);
+        }
+      });
+    }
+  });
+  
   tryFetch();
 })();
 </script>

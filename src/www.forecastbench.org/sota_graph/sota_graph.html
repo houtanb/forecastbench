@@ -210,6 +210,9 @@
       if (baselines.superforecaster !== undefined) {
         refs.push({y:baselines.superforecaster, label:'Superforecaster'});
       }
+      if (baselines.imputed !== undefined) {
+        refs.push({y:baselines.imputed, label:'Market'});
+      }
       for (const r of refs){
         g.append('line').attr('class','refline')
          .attr('x1',0).attr('x2',width).attr('y1',y(r.y)).attr('y2',y(r.y));
@@ -445,6 +448,21 @@
             hasCI = true;
           }
         }
+      } else if (label === 'Market') {
+        title = 'Market Forecast';
+        // Get CI from original CSV data, but only show for 'overall'
+        const imputedRow = originalRows.find(d => d.model === 'Imputed Forecaster' && (d.type||'').trim().toLowerCase() === baselineType);
+        if (imputedRow && baselineType === 'overall') {
+          const lbRaw = imputedRow.conf_int_lb;
+          const ubRaw = imputedRow.conf_int_ub;
+          const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
+          const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
+          if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
+            lb = lbNum;
+            ub = ubNum;
+            hasCI = true;
+          }
+        }
       }
       
       let html = `
@@ -470,6 +488,7 @@
     // Baselines of the selected type
     const superforecasterRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && isType(d));
     const publicRow = originalRows.find(d => d.model === 'Public median forecast' && isType(d));
+    const imputedForecastRow = originalRows.find(d => d.model === 'Imputed Forecaster' && isType(d));
     
     // Data rows of the selected type with dates
     const filtered = originalRows.filter(d => isType(d) && d.release_date && d.release_date.trim() !== '');
@@ -486,6 +505,7 @@
     const baselines = {};
     if (superforecasterRow) baselines.superforecaster = +superforecasterRow.diff_adj_brier;
     if (publicRow) baselines.public = +publicRow.diff_adj_brier;
+    if (imputedForecastRow && typeNorm === 'market') baselines.imputed = +imputedForecastRow.diff_adj_brier;
     
     markSOTA(parsed);
     const showErrorBars = typeNorm === 'overall';

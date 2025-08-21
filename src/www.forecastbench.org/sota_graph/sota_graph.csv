@@ -1,168 +1,502 @@
-model,overall_score,release_date,conf_int_lb,conf_int_ub
-Superforecaster median forecast,0.077,,0.057,0.096
-GPT-4.5-Preview-2025-02-27 (zero shot with freeze values),0.101,2025-02-27,0.094,0.108
-GPT-4.5-Preview-2025-02-27 (scratchpad with freeze values),0.102,2025-02-27,0.095,0.11
-Claude-3-7-Sonnet-20250219 (scratchpad with freeze values),0.104,2025-02-24,0.097,0.111
-O3-2025-04-16 (zero shot with freeze values),0.105,2025-04-16,0.094,0.116
-GPT-4.1-2025-04-14 (scratchpad with freeze values),0.11,2025-04-14,0.098,0.122
-O3-2025-04-16 (scratchpad with freeze values),0.111,2025-04-16,0.1,0.122
-O3-Mini-2025-01-31 (zero shot with freeze values),0.111,2025-01-31,0.103,0.118
-Claude-3-7-Sonnet-20250219 (zero shot with freeze values),0.112,2025-02-24,0.105,0.119
-DeepSeek-R1 (scratchpad with freeze values),0.112,2025-01-20,0.106,0.119
-Grok-2-1212 (zero shot with freeze values),0.113,2024-12-12,0.105,0.12
-Claude-3-5-Sonnet-20240620 (zero shot with freeze values),0.115,2024-06-20,0.107,0.122
-Public median forecast,0.115,,0.098,0.131
-GPT-4-Turbo-2024-04-09 (zero shot with freeze values),0.116,2024-04-09,0.105,0.126
-Claude-3-5-Sonnet-20241022 (zero shot with freeze values),0.116,2024-10-22,0.108,0.123
-Claude-3-5-Sonnet-20241022 (scratchpad with freeze values),0.116,2024-10-22,0.109,0.122
-Grok-3-Mini-Beta (zero shot with freeze values),0.116,2025-02-17,0.104,0.127
-Grok-3-Beta (zero shot with freeze values),0.116,2025-02-17,0.104,0.127
-Gemini-2.5-Flash-Preview-04-17 (scratchpad with freeze values),0.116,2025-04-17,0.103,0.129
-Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),0.116,2024-06-20,0.109,0.123
-GPT-4.1-2025-04-14 (zero shot with freeze values),0.118,2025-04-14,0.106,0.133
-DeepSeek-V3 (zero shot with freeze values),0.118,2024-12-25,0.111,0.125
-O3-2025-04-16 (zero shot),0.119,2025-04-16,0.104,0.138
-GPT-4.5-Preview-2025-02-27 (zero shot),0.12,2025-02-27,0.109,0.131
-Gemini-2.5-Flash-Preview-04-17 (zero shot),0.12,2025-04-17,0.106,0.138
-O3-2025-04-16 (scratchpad),0.122,2025-04-16,0.109,0.14
-Mistral-Large-2407 (zero shot with freeze values),0.123,2024-07-24,0.115,0.13
-Llama-3.3-70B-Instruct-Turbo (zero shot with freeze values),0.124,2024-12-06,0.117,0.131
-GPT-4o-2024-05-13 (zero shot with freeze values),0.124,2024-05-13,0.114,0.133
-GPT-4 (zero shot with freeze values),0.124,2023-03-14,0.113,0.135
-Claude-3-7-Sonnet-20250219 (scratchpad),0.124,2025-02-24,0.117,0.132
-QwQ-32B-Preview (scratchpad with freeze values),0.124,2024-11-28,0.117,0.133
-GPT-4.5-Preview-2025-02-27 (scratchpad),0.124,2025-02-27,0.115,0.133
-O3-Mini-2025-01-31 (scratchpad with freeze values),0.125,2025-01-31,0.117,0.134
-Claude-3-Opus-20240229 (zero shot with freeze values),0.125,2024-02-29,0.113,0.137
-Llama-3.3-70B-Instruct-Turbo (scratchpad with freeze values),0.127,2024-12-06,0.12,0.134
-Grok-2-1212 (zero shot),0.128,2024-12-12,0.118,0.139
-Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),0.128,2024-06-20,0.117,0.139
-DeepSeek-V3 (scratchpad with freeze values),0.128,2024-12-25,0.116,0.14
-Gemini-2.5-Flash-Preview-04-17 (zero shot with freeze values),0.129,2025-04-17,0.113,0.146
-Grok-3-Beta (zero shot),0.129,2025-02-17,0.116,0.147
-GPT-4.1-2025-04-14 (scratchpad),0.13,2025-04-14,0.114,0.15
-Grok-3-Mini-Beta (zero shot),0.13,2025-02-17,0.118,0.145
-Gemini-2.5-Flash-Preview-04-17 (scratchpad),0.131,2025-04-17,0.114,0.152
-GPT-4o (scratchpad with freeze values),0.132,2024-05-13,0.121,0.142
-GPT-4-Turbo-2024-04-09 (scratchpad with freeze values),0.133,2024-04-09,0.12,0.148
-Claude-3-5-Sonnet-20240620 (zero shot),0.135,2024-06-20,0.127,0.144
-Claude-3-5-Sonnet-20241022 (scratchpad),0.135,2024-10-22,0.127,0.144
-GPT-4o-2024-11-20 (zero shot with freeze values with web search),0.136,2024-11-20,0.113,0.162
-Claude-3-5-Sonnet-20241022 (zero shot),0.136,2024-10-22,0.127,0.147
-GPT-4.1-2025-04-14 (zero shot),0.136,2025-04-14,0.116,0.161
-O3-Mini-2025-01-31 (zero shot),0.137,2025-01-31,0.128,0.146
-Llama-4-Scout-17B-16E-Instruct (zero shot with freeze values),0.137,2025-04-05,0.128,0.146
-DeepSeek-R1 (scratchpad),0.138,2025-01-20,0.13,0.145
-Gemini-2.0-Flash-Lite-001 (scratchpad with freeze values),0.138,2025-02-05,0.126,0.151
-Claude-3-5-Sonnet-20240620 (scratchpad),0.138,2024-06-20,0.131,0.146
-GPT-4o (zero shot with freeze values),0.138,2024-05-13,0.127,0.151
-GPT-4o-2024-05-13 (zero shot),0.139,2024-05-13,0.13,0.148
-GPT-4o (scratchpad with news with freeze values),0.139,2024-05-13,0.128,0.151
-Gemini-1.5-Pro (scratchpad with freeze values),0.14,2024-05-01,0.13,0.151
-Llama-3-8b-Chat-Hf (zero shot with freeze values),0.141,2024-04-18,0.125,0.158
-Claude-3-Opus-20240229 (scratchpad with freeze values),0.141,2024-02-29,0.13,0.152
-Llama-3.3-70B-Instruct-Turbo (zero shot),0.141,2024-12-06,0.133,0.15
-Qwen1.5-110B-Chat (zero shot with freeze values),0.141,2024-04-25,0.13,0.152
-GPT-4-Turbo-2024-04-09 (zero shot),0.142,2024-04-09,0.13,0.155
-Claude-3-7-Sonnet-20250219 (zero shot),0.142,2025-02-24,0.132,0.154
-Claude-3-5-Sonnet-20240620 (scratchpad with news),0.143,2024-06-20,0.132,0.154
-DeepSeek-V3 (zero shot),0.144,2024-12-25,0.137,0.152
-Mistral-Large-2407 (zero shot),0.145,2024-07-24,0.136,0.155
-Llama-3-70b-Chat-Hf (zero shot with freeze values),0.145,2024-04-18,0.133,0.157
-QwQ-32B-Preview (scratchpad),0.146,2024-11-28,0.138,0.154
-Claude-3-5-Sonnet-20240620 (superforecaster with news 3),0.146,2024-06-20,0.135,0.157
-Gemini-1.5-Pro (scratchpad),0.146,2024-05-01,0.133,0.161
-GPT-4 (scratchpad with freeze values),0.146,2023-03-14,0.135,0.157
-DeepSeek-V3 (scratchpad),0.147,2024-12-25,0.134,0.161
-GPT-4-Turbo-2024-04-09 (scratchpad with news with freeze values),0.147,2024-04-09,0.134,0.161
-Mixtral-8x22B-Instruct-V0.1 (zero shot with freeze values),0.147,2024-04-01,0.133,0.161
-Claude-2.1 (zero shot with freeze values),0.147,2023-11-21,0.135,0.159
-Llama-4-Scout-17B-16E-Instruct (zero shot),0.148,2025-04-05,0.138,0.159
-GPT-4o-2024-11-20 (scratchpad with freeze values with web search),0.148,2024-11-20,0.133,0.166
-Mistral-Large-Latest (zero shot with freeze values),0.148,2024-02-26,0.135,0.162
-Gemini-1.5-Flash (zero shot with freeze values),0.148,2024-05-01,0.134,0.164
-Mistral-Large-Latest (scratchpad with freeze values),0.15,2024-02-26,0.138,0.163
-Imputed Forecaster,0.151,,0.145,0.157
-GPT-4o-2024-11-20 (scratchpad with web search),0.151,2024-11-20,0.135,0.168
-Mixtral-8x22B-Instruct-V0.1 (scratchpad with freeze values),0.152,2024-04-17,0.14,0.164
-Mixtral-8x7B-Instruct-V0.1 (zero shot with freeze values),0.152,2023-12-11,0.137,0.168
-GPT-4-Turbo-2024-04-09 (scratchpad),0.152,2024-04-09,0.139,0.165
-Gemini-1.5-Pro (scratchpad with news with freeze values),0.153,2024-05-01,0.141,0.167
-GPT-4o (scratchpad with news),0.153,2024-05-13,0.14,0.166
-GPT-4o (scratchpad),0.153,2024-05-13,0.141,0.165
-Llama-3-8b-Chat-Hf (zero shot),0.154,2024-04-18,0.134,0.175
-Llama-3.3-70B-Instruct-Turbo (scratchpad),0.154,2024-12-06,0.147,0.162
-GPT-4o-2024-11-20 (zero shot with web search),0.156,2024-11-20,0.131,0.181
-Llama-3-70b-Chat-Hf (scratchpad with freeze values),0.156,2024-04-18,0.146,0.166
-GPT-4-Turbo-2024-04-09 (scratchpad with news),0.157,2024-04-09,0.144,0.172
-Qwen1.5-110B-Chat (scratchpad with freeze values),0.157,2024-04-25,0.146,0.169
-GPT-4 (scratchpad),0.159,2023-03-14,0.148,0.171
-Gemini-2.0-Flash-Lite-001 (scratchpad),0.159,2025-02-05,0.149,0.17
-O3-Mini-2025-01-31 (scratchpad),0.159,2025-01-31,0.147,0.17
-Gemini-1.5-Pro (scratchpad with news),0.16,2024-05-01,0.146,0.175
-Claude-3-Opus-20240229 (scratchpad),0.16,2024-02-29,0.147,0.173
-Qwen1.5-110B-Chat (scratchpad with news with freeze values),0.16,2024-04-25,0.149,0.172
-Naive Forecaster,0.161,,0.154,0.168
-Qwen1.5-110B-Chat (scratchpad),0.161,2024-04-25,0.151,0.173
-Claude-3-Opus-20240229 (zero shot),0.162,2024-02-29,0.146,0.179
-Gemini-1.5-Flash (scratchpad with freeze values),0.162,2024-05-01,0.15,0.175
-Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),0.162,2024-06-20,0.151,0.174
-GPT-4o (zero shot),0.162,2024-05-13,0.149,0.178
-Mixtral-8x22B-Instruct-V0.1 (scratchpad with news with freeze values),0.163,2024-04-17,0.151,0.176
-GPT-4o (superforecaster with news 1),0.164,2024-05-13,0.149,0.181
-Mistral-Large-Latest (scratchpad),0.166,2024-02-26,0.154,0.181
-GPT-4 (zero shot),0.168,2023-03-14,0.156,0.181
-Mixtral-8x22B-Instruct-V0.1 (scratchpad with news),0.169,2024-04-17,0.156,0.182
-Qwen1.5-110B-Chat (scratchpad with news),0.17,2024-04-25,0.158,0.183
-Mixtral-8x22B-Instruct-V0.1 (scratchpad),0.171,2024-04-17,0.16,0.186
-Claude-3-5-Sonnet-20240620 (superforecaster with news 2),0.172,2024-06-20,0.156,0.187
-Qwen1.5-110B-Chat (zero shot),0.172,2024-04-25,0.16,0.186
-Mistral-Large-Latest (zero shot),0.172,2024-02-26,0.156,0.189
-Mixtral-8x7B-Instruct-V0.1 (zero shot),0.173,2023-12-11,0.154,0.193
-"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",0.173,,0.163,0.182
-Llama-3-8b-Chat-Hf (scratchpad with freeze values),0.173,2024-04-18,0.161,0.184
-Gemini-2.0-Flash-Lite-001 (zero shot with freeze values),0.173,2025-02-05,0.154,0.196
-Llama-3-70b-Chat-Hf (zero shot),0.173,2024-04-18,0.159,0.188
-Claude-3-Opus-20240229 (scratchpad with news with freeze values),0.173,2024-02-29,0.16,0.186
-Gemini-2.0-Flash-Lite-001 (zero shot),0.174,2025-02-05,0.158,0.191
-"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",0.174,,0.165,0.185
-"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",0.174,,0.165,0.184
-Gemini-1.5-Pro (superforecaster with news 3),0.175,2024-05-01,0.16,0.19
-Claude-3-Opus-20240229 (superforecaster with news 2),0.176,2024-02-29,0.16,0.192
-Mixtral-8x22B-Instruct-V0.1 (zero shot),0.178,2024-04-17,0.163,0.195
-Gemini-1.5-Flash (scratchpad with news with freeze values),0.179,2024-05-01,0.164,0.194
-GPT-4-Turbo-2024-04-09 (superforecaster with news 1),0.18,2024-04-09,0.164,0.197
-Mistral-Large-Latest (scratchpad with news with freeze values),0.18,2024-02-26,0.165,0.194
-Claude-3-Opus-20240229 (scratchpad with news),0.181,2024-02-29,0.168,0.194
-Gemini-1.5-Flash (scratchpad),0.181,2024-05-01,0.167,0.196
-Mistral-Large-Latest (scratchpad with news),0.187,2024-02-26,0.173,0.202
-Claude-2.1 (scratchpad with news with freeze values),0.188,2023-11-21,0.173,0.202
-Llama-3-70b-Chat-Hf (scratchpad),0.189,2024-04-18,0.177,0.201
-Claude-2.1 (zero shot),0.19,2023-11-21,0.176,0.206
-Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),0.192,2024-04-17,0.179,0.205
-Gemini-1.5-Flash (scratchpad with news),0.194,2024-05-01,0.178,0.21
-Gemini-1.5-Flash (zero shot),0.194,2024-05-01,0.178,0.213
-Gemini-1.5-Pro (superforecaster with news 2),0.195,2024-05-01,0.176,0.215
-Mixtral-8x7B-Instruct-V0.1 (scratchpad),0.197,2023-12-11,0.182,0.211
-Llama-3-8b-Chat-Hf (scratchpad),0.202,2024-04-18,0.188,0.216
-Claude-3-Haiku-20240307 (zero shot with freeze values),0.205,2024-03-13,0.193,0.216
-Mixtral-8x7B-Instruct-V0.1 (scratchpad with freeze values),0.211,2023-12-11,0.194,0.229
-Claude-3-Haiku-20240307 (scratchpad with freeze values),0.214,2024-03-13,0.199,0.227
-Llama-2-70b-Chat-Hf (scratchpad with freeze values),0.216,2023-07-18,0.203,0.23
-Llama-2-70b-Chat-Hf (scratchpad),0.217,2023-07-18,0.202,0.233
-Claude-3-Haiku-20240307 (scratchpad),0.221,2024-03-13,0.206,0.236
-Llama-2-70b-Chat-Hf (zero shot with freeze values),0.223,2023-07-18,0.203,0.244
-Claude-3-Haiku-20240307 (zero shot),0.223,2024-03-13,0.211,0.236
-GPT-3.5-Turbo-0125 (scratchpad),0.228,2024-01-25,0.212,0.244
-Mixtral-8x7B-Instruct-V0.1 (scratchpad with news with freeze values),0.229,2023-12-11,0.213,0.246
-GPT-3.5-Turbo-0125 (scratchpad with freeze values),0.229,2024-01-25,0.213,0.245
-Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),0.23,2023-12-11,0.216,0.245
-Claude-3-Haiku-20240307 (scratchpad with news with freeze values),0.23,2024-03-13,0.215,0.244
-Claude-3-Haiku-20240307 (scratchpad with news),0.235,2024-03-13,0.221,0.249
-Always 0.5,0.25,,0.25,0.25
-GPT-3.5-Turbo-0125 (zero shot with freeze values),0.262,2024-01-25,0.243,0.281
-Always 0,0.267,,0.25,0.284
-Llama-2-70b-Chat-Hf (zero shot),0.268,2023-07-18,0.247,0.29
-GPT-3.5-Turbo-0125 (zero shot),0.32,2024-01-25,0.298,0.343
-Random Uniform,0.333,,0.317,0.347
-Always 1,0.733,,0.716,0.75
+model,type,diff_adj_brier,sample_size,conf_int_lb,conf_int_ub,release_date
+Superforecaster median forecast,dataset,0.13,526,,,
+GPT-4.5-Preview-2025-02-27 (zero shot with freeze values),dataset,0.147,1791,,,2025-02-27
+GPT-4.5-Preview-2025-02-27 (scratchpad with freeze values),dataset,0.143,1791,,,2025-02-27
+Claude-3-7-Sonnet-20250219 (scratchpad with freeze values),dataset,0.147,4458,,,2025-02-24
+O3-2025-04-16 (zero shot with freeze values),dataset,0.144,889,,,2025-04-16
+GPT-4.1-2025-04-14 (scratchpad with freeze values),dataset,0.154,889,,,2025-04-14
+O3-2025-04-16 (scratchpad with freeze values),dataset,0.153,889,,,2025-04-16
+O3-Mini-2025-01-31 (zero shot with freeze values),dataset,0.155,3564,,,2025-01-31
+Claude-3-7-Sonnet-20250219 (zero shot with freeze values),dataset,0.157,4458,,,2025-02-24
+DeepSeek-R1 (scratchpad with freeze values),dataset,0.157,4458,,,2025-01-20
+Grok-2-1212 (zero shot with freeze values),dataset,0.163,1778,,,2024-12-12
+Claude-3-5-Sonnet-20240620 (zero shot with freeze values),dataset,0.162,5872,,,2024-06-20
+Public median forecast,dataset,0.166,526,,,
+GPT-4-Turbo-2024-04-09 (zero shot with freeze values),dataset,0.175,1414,,,2024-04-09
+Claude-3-5-Sonnet-20241022 (zero shot with freeze values),dataset,0.163,4458,,,2024-10-22
+Claude-3-5-Sonnet-20241022 (scratchpad with freeze values),dataset,0.17,4458,,,2024-10-22
+Grok-3-Mini-Beta (zero shot with freeze values),dataset,0.163,889,,,2025-02-17
+Grok-3-Beta (zero shot with freeze values),dataset,0.163,889,,,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad with freeze values),dataset,0.151,889,,,2025-04-17
+Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),dataset,0.165,5872,,,2024-06-20
+GPT-4.1-2025-04-14 (zero shot with freeze values),dataset,0.157,889,,,2025-04-14
+DeepSeek-V3 (zero shot with freeze values),dataset,0.167,4458,,,2024-12-25
+O3-2025-04-16 (zero shot),dataset,0.144,889,,,2025-04-16
+GPT-4.5-Preview-2025-02-27 (zero shot),dataset,0.147,1791,,,2025-02-27
+Gemini-2.5-Flash-Preview-04-17 (zero shot),dataset,0.152,889,,,2025-04-17
+O3-2025-04-16 (scratchpad),dataset,0.153,889,,,2025-04-16
+Mistral-Large-2407 (zero shot with freeze values),dataset,0.178,2667,,,2024-07-24
+Llama-3.3-70B-Instruct-Turbo (zero shot with freeze values),dataset,0.182,4458,,,2024-12-06
+GPT-4o-2024-05-13 (zero shot with freeze values),dataset,0.177,2667,,,2024-05-13
+GPT-4 (zero shot with freeze values),dataset,0.187,1414,,,2023-03-14
+Claude-3-7-Sonnet-20250219 (scratchpad),dataset,0.147,4458,,,2025-02-24
+QwQ-32B-Preview (scratchpad with freeze values),dataset,0.183,2667,,,2024-11-28
+GPT-4.5-Preview-2025-02-27 (scratchpad),dataset,0.143,1791,,,2025-02-27
+O3-Mini-2025-01-31 (scratchpad with freeze values),dataset,0.161,897,,,2025-01-31
+Claude-3-Opus-20240229 (zero shot with freeze values),dataset,0.18,1414,,,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (scratchpad with freeze values),dataset,0.176,4458,,,2024-12-06
+Grok-2-1212 (zero shot),dataset,0.163,1778,,,2024-12-12
+Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),dataset,0.17,1414,,,2024-06-20
+DeepSeek-V3 (scratchpad with freeze values),dataset,0.163,894,,,2024-12-25
+Gemini-2.5-Flash-Preview-04-17 (zero shot with freeze values),dataset,0.152,889,,,2025-04-17
+Grok-3-Beta (zero shot),dataset,0.163,889,,,2025-02-17
+GPT-4.1-2025-04-14 (scratchpad),dataset,0.154,889,,,2025-04-14
+Grok-3-Mini-Beta (zero shot),dataset,0.163,889,,,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad),dataset,0.151,889,,,2025-04-17
+GPT-4o (scratchpad with freeze values),dataset,0.184,1414,,,2024-05-13
+GPT-4-Turbo-2024-04-09 (scratchpad with freeze values),dataset,0.185,1414,,,2024-04-09
+Claude-3-5-Sonnet-20240620 (zero shot),dataset,0.162,5872,,,2024-06-20
+Claude-3-5-Sonnet-20241022 (scratchpad),dataset,0.17,4458,,,2024-10-22
+GPT-4o-2024-11-20 (zero shot with freeze values with web search),dataset,0.168,894,,,2024-11-20
+Claude-3-5-Sonnet-20241022 (zero shot),dataset,0.163,4458,,,2024-10-22
+GPT-4.1-2025-04-14 (zero shot),dataset,0.157,889,,,2025-04-14
+O3-Mini-2025-01-31 (zero shot),dataset,0.155,3564,,,2025-01-31
+Llama-4-Scout-17B-16E-Instruct (zero shot with freeze values),dataset,0.189,1774,,,2025-04-05
+DeepSeek-R1 (scratchpad),dataset,0.157,4458,,,2025-01-20
+Gemini-2.0-Flash-Lite-001 (scratchpad with freeze values),dataset,0.18,1778,,,2025-02-05
+Claude-3-5-Sonnet-20240620 (scratchpad),dataset,0.165,5872,,,2024-06-20
+GPT-4o (zero shot with freeze values),dataset,0.208,1414,,,2024-05-13
+GPT-4o-2024-05-13 (zero shot),dataset,0.177,2667,,,2024-05-13
+GPT-4o (scratchpad with news with freeze values),dataset,0.192,1414,,,2024-05-13
+Gemini-1.5-Pro (scratchpad with freeze values),dataset,0.176,1414,,,2024-05-01
+Llama-3-8b-Chat-Hf (zero shot with freeze values),dataset,0.203,1414,,,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with freeze values),dataset,0.174,1414,,,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (zero shot),dataset,0.182,4458,,,2024-12-06
+Qwen1.5-110B-Chat (zero shot with freeze values),dataset,0.197,1414,,,2024-04-25
+GPT-4-Turbo-2024-04-09 (zero shot),dataset,0.175,1414,,,2024-04-09
+Claude-3-7-Sonnet-20250219 (zero shot),dataset,0.157,4458,,,2025-02-24
+Claude-3-5-Sonnet-20240620 (scratchpad with news),dataset,0.17,1414,,,2024-06-20
+DeepSeek-V3 (zero shot),dataset,0.167,4458,,,2024-12-25
+Mistral-Large-2407 (zero shot),dataset,0.178,2667,,,2024-07-24
+Llama-3-70b-Chat-Hf (zero shot with freeze values),dataset,0.21,1414,,,2024-04-18
+QwQ-32B-Preview (scratchpad),dataset,0.183,2667,,,2024-11-28
+Claude-3-5-Sonnet-20240620 (superforecaster with news 3),dataset,0.185,1414,,,2024-06-20
+Gemini-1.5-Pro (scratchpad),dataset,0.176,1414,,,2024-05-01
+GPT-4 (scratchpad with freeze values),dataset,0.19,1414,,,2023-03-14
+DeepSeek-V3 (scratchpad),dataset,0.163,894,,,2024-12-25
+GPT-4-Turbo-2024-04-09 (scratchpad with news with freeze values),dataset,0.196,1414,,,2024-04-09
+Mixtral-8x22B-Instruct-V0.1 (zero shot with freeze values),dataset,0.207,1414,,,2024-04-01
+Claude-2.1 (zero shot with freeze values),dataset,0.219,1414,,,2023-11-21
+Llama-4-Scout-17B-16E-Instruct (zero shot),dataset,0.189,1774,,,2025-04-05
+GPT-4o-2024-11-20 (scratchpad with freeze values with web search),dataset,0.171,894,,,2024-11-20
+Mistral-Large-Latest (zero shot with freeze values),dataset,0.204,1414,,,2024-02-26
+Gemini-1.5-Flash (zero shot with freeze values),dataset,0.21,1414,,,2024-05-01
+Mistral-Large-Latest (scratchpad with freeze values),dataset,0.189,1414,,,2024-02-26
+Imputed Forecaster,dataset,0.25,5872,,,
+GPT-4o-2024-11-20 (scratchpad with web search),dataset,0.171,894,,,2024-11-20
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with freeze values),dataset,0.198,1414,,,2024-04-17
+Mixtral-8x7B-Instruct-V0.1 (zero shot with freeze values),dataset,0.216,1414,,,2023-12-11
+GPT-4-Turbo-2024-04-09 (scratchpad),dataset,0.185,1414,,,2024-04-09
+Gemini-1.5-Pro (scratchpad with news with freeze values),dataset,0.185,1414,,,2024-05-01
+GPT-4o (scratchpad with news),dataset,0.192,1414,,,2024-05-13
+GPT-4o (scratchpad),dataset,0.184,1414,,,2024-05-13
+Llama-3-8b-Chat-Hf (zero shot),dataset,0.203,1414,,,2024-04-18
+Llama-3.3-70B-Instruct-Turbo (scratchpad),dataset,0.176,4458,,,2024-12-06
+GPT-4o-2024-11-20 (zero shot with web search),dataset,0.168,894,,,2024-11-20
+Llama-3-70b-Chat-Hf (scratchpad with freeze values),dataset,0.209,1414,,,2024-04-18
+GPT-4-Turbo-2024-04-09 (scratchpad with news),dataset,0.196,1414,,,2024-04-09
+Qwen1.5-110B-Chat (scratchpad with freeze values),dataset,0.185,1414,,,2024-04-25
+GPT-4 (scratchpad),dataset,0.19,1414,,,2023-03-14
+Gemini-2.0-Flash-Lite-001 (scratchpad),dataset,0.18,1778,,,2025-02-05
+O3-Mini-2025-01-31 (scratchpad),dataset,0.161,897,,,2025-01-31
+Gemini-1.5-Pro (scratchpad with news),dataset,0.185,1414,,,2024-05-01
+Claude-3-Opus-20240229 (scratchpad),dataset,0.174,1414,,,2024-02-29
+Qwen1.5-110B-Chat (scratchpad with news with freeze values),dataset,0.19,1414,,,2024-04-25
+Naive Forecaster,dataset,0.27,5872,,,
+Qwen1.5-110B-Chat (scratchpad),dataset,0.185,1414,,,2024-04-25
+Claude-3-Opus-20240229 (zero shot),dataset,0.18,1414,,,2024-02-29
+Gemini-1.5-Flash (scratchpad with freeze values),dataset,0.212,1414,,,2024-05-01
+Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),dataset,0.211,1414,,,2024-06-20
+GPT-4o (zero shot),dataset,0.208,1414,,,2024-05-13
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news with freeze values),dataset,0.208,1414,,,2024-04-17
+GPT-4o (superforecaster with news 1),dataset,0.21,1414,,,2024-05-13
+Mistral-Large-Latest (scratchpad),dataset,0.189,1414,,,2024-02-26
+GPT-4 (zero shot),dataset,0.187,1414,,,2023-03-14
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news),dataset,0.208,1414,,,2024-04-17
+Qwen1.5-110B-Chat (scratchpad with news),dataset,0.19,1414,,,2024-04-25
+Mixtral-8x22B-Instruct-V0.1 (scratchpad),dataset,0.198,1414,,,2024-04-17
+Claude-3-5-Sonnet-20240620 (superforecaster with news 2),dataset,0.207,1414,,,2024-06-20
+Qwen1.5-110B-Chat (zero shot),dataset,0.197,1414,,,2024-04-25
+Mistral-Large-Latest (zero shot),dataset,0.204,1414,,,2024-02-26
+Mixtral-8x7B-Instruct-V0.1 (zero shot),dataset,0.216,1414,,,2023-12-11
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",dataset,0.239,1414,,,
+Llama-3-8b-Chat-Hf (scratchpad with freeze values),dataset,0.238,1414,,,2024-04-18
+Gemini-2.0-Flash-Lite-001 (zero shot with freeze values),dataset,0.213,1778,,,2025-02-05
+Llama-3-70b-Chat-Hf (zero shot),dataset,0.21,1414,,,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with news with freeze values),dataset,0.201,1414,,,2024-02-29
+Gemini-2.0-Flash-Lite-001 (zero shot),dataset,0.213,1778,,,2025-02-05
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",dataset,0.239,1414,,,
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",dataset,0.239,1414,,,
+Gemini-1.5-Pro (superforecaster with news 3),dataset,0.202,1414,,,2024-05-01
+Claude-3-Opus-20240229 (superforecaster with news 2),dataset,0.195,1414,,,2024-02-29
+Mixtral-8x22B-Instruct-V0.1 (zero shot),dataset,0.207,1414,,,2024-04-17
+Gemini-1.5-Flash (scratchpad with news with freeze values),dataset,0.228,1414,,,2024-05-01
+GPT-4-Turbo-2024-04-09 (superforecaster with news 1),dataset,0.206,1414,,,2024-04-09
+Mistral-Large-Latest (scratchpad with news with freeze values),dataset,0.21,1414,,,2024-02-26
+Claude-3-Opus-20240229 (scratchpad with news),dataset,0.201,1414,,,2024-02-29
+Gemini-1.5-Flash (scratchpad),dataset,0.212,1414,,,2024-05-01
+Mistral-Large-Latest (scratchpad with news),dataset,0.21,1414,,,2024-02-26
+Claude-2.1 (scratchpad with news with freeze values),dataset,0.226,1414,,,2023-11-21
+Llama-3-70b-Chat-Hf (scratchpad),dataset,0.209,1414,,,2024-04-18
+Claude-2.1 (zero shot),dataset,0.219,1414,,,2023-11-21
+Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),dataset,0.229,1414,,,2024-04-17
+Gemini-1.5-Flash (scratchpad with news),dataset,0.228,1414,,,2024-05-01
+Gemini-1.5-Flash (zero shot),dataset,0.21,1414,,,2024-05-01
+Gemini-1.5-Pro (superforecaster with news 2),dataset,0.226,1414,,,2024-05-01
+Mixtral-8x7B-Instruct-V0.1 (scratchpad),dataset,0.222,1414,,,2023-12-11
+Llama-3-8b-Chat-Hf (scratchpad),dataset,0.238,1414,,,2024-04-18
+Claude-3-Haiku-20240307 (zero shot with freeze values),dataset,0.297,1414,,,2024-03-13
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with freeze values),dataset,0.222,1414,,,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with freeze values),dataset,0.243,1414,,,2024-03-13
+Llama-2-70b-Chat-Hf (scratchpad with freeze values),dataset,0.245,1414,,,2023-07-18
+Llama-2-70b-Chat-Hf (scratchpad),dataset,0.245,1414,,,2023-07-18
+Claude-3-Haiku-20240307 (scratchpad),dataset,0.243,1414,,,2024-03-13
+Llama-2-70b-Chat-Hf (zero shot with freeze values),dataset,0.25,1414,,,2023-07-18
+Claude-3-Haiku-20240307 (zero shot),dataset,0.297,1414,,,2024-03-13
+GPT-3.5-Turbo-0125 (scratchpad),dataset,0.26,1414,,,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news with freeze values),dataset,0.267,1414,,,2023-12-11
+GPT-3.5-Turbo-0125 (scratchpad with freeze values),dataset,0.26,1414,,,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),dataset,0.267,1414,,,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with news with freeze values),dataset,0.278,1414,,,2024-03-13
+Claude-3-Haiku-20240307 (scratchpad with news),dataset,0.278,1414,,,2024-03-13
+Always 0.5,dataset,0.25,5872,,,
+GPT-3.5-Turbo-0125 (zero shot with freeze values),dataset,0.415,1414,,,2024-01-25
+Always 0,dataset,0.391,5872,,,
+Llama-2-70b-Chat-Hf (zero shot),dataset,0.25,1414,,,2023-07-18
+GPT-3.5-Turbo-0125 (zero shot),dataset,0.415,1414,,,2024-01-25
+Random Uniform,dataset,0.331,5872,,,
+Always 1,dataset,0.609,5872,,,
+Superforecaster median forecast,market,0.023,54,,,
+GPT-4.5-Preview-2025-02-27 (zero shot with freeze values),market,0.055,119,,,2025-02-27
+GPT-4.5-Preview-2025-02-27 (scratchpad with freeze values),market,0.061,119,,,2025-02-27
+Claude-3-7-Sonnet-20250219 (scratchpad with freeze values),market,0.061,282,,,2025-02-24
+O3-2025-04-16 (zero shot with freeze values),market,0.067,52,,,2025-04-16
+GPT-4.1-2025-04-14 (scratchpad with freeze values),market,0.066,52,,,2025-04-14
+O3-2025-04-16 (scratchpad with freeze values),market,0.07,52,,,2025-04-16
+O3-Mini-2025-01-31 (zero shot with freeze values),market,0.066,223,,,2025-01-31
+Claude-3-7-Sonnet-20250219 (zero shot with freeze values),market,0.066,282,,,2025-02-24
+DeepSeek-R1 (scratchpad with freeze values),market,0.068,282,,,2025-01-20
+Grok-2-1212 (zero shot with freeze values),market,0.062,111,,,2024-12-12
+Claude-3-5-Sonnet-20240620 (zero shot with freeze values),market,0.067,400,,,2024-06-20
+Public median forecast,market,0.064,54,,,
+GPT-4-Turbo-2024-04-09 (zero shot with freeze values),market,0.056,118,,,2024-04-09
+Claude-3-5-Sonnet-20241022 (zero shot with freeze values),market,0.069,282,,,2024-10-22
+Claude-3-5-Sonnet-20241022 (scratchpad with freeze values),market,0.061,282,,,2024-10-22
+Grok-3-Mini-Beta (zero shot with freeze values),market,0.068,52,,,2025-02-17
+Grok-3-Beta (zero shot with freeze values),market,0.068,52,,,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad with freeze values),market,0.081,52,,,2025-04-17
+Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),market,0.067,400,,,2024-06-20
+GPT-4.1-2025-04-14 (zero shot with freeze values),market,0.08,52,,,2025-04-14
+DeepSeek-V3 (zero shot with freeze values),market,0.069,282,,,2024-12-25
+O3-2025-04-16 (zero shot),market,0.095,52,,,2025-04-16
+GPT-4.5-Preview-2025-02-27 (zero shot),market,0.093,119,,,2025-02-27
+Gemini-2.5-Flash-Preview-04-17 (zero shot),market,0.089,52,,,2025-04-17
+O3-2025-04-16 (scratchpad),market,0.092,52,,,2025-04-16
+Mistral-Large-2407 (zero shot with freeze values),market,0.068,163,,,2024-07-24
+Llama-3.3-70B-Instruct-Turbo (zero shot with freeze values),market,0.067,282,,,2024-12-06
+GPT-4o-2024-05-13 (zero shot with freeze values),market,0.07,163,,,2024-05-13
+GPT-4 (zero shot with freeze values),market,0.062,118,,,2023-03-14
+Claude-3-7-Sonnet-20250219 (scratchpad),market,0.101,282,,,2025-02-24
+QwQ-32B-Preview (scratchpad with freeze values),market,0.065,163,,,2024-11-28
+GPT-4.5-Preview-2025-02-27 (scratchpad),market,0.104,119,,,2025-02-27
+O3-Mini-2025-01-31 (scratchpad with freeze values),market,0.09,60,,,2025-01-31
+Claude-3-Opus-20240229 (zero shot with freeze values),market,0.069,118,,,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (scratchpad with freeze values),market,0.079,282,,,2024-12-06
+Grok-2-1212 (zero shot),market,0.093,111,,,2024-12-12
+Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),market,0.086,118,,,2024-06-20
+DeepSeek-V3 (scratchpad with freeze values),market,0.093,59,,,2024-12-25
+Gemini-2.5-Flash-Preview-04-17 (zero shot with freeze values),market,0.105,52,,,2025-04-17
+Grok-3-Beta (zero shot),market,0.096,52,,,2025-02-17
+GPT-4.1-2025-04-14 (scratchpad),market,0.106,52,,,2025-04-14
+Grok-3-Mini-Beta (zero shot),market,0.097,52,,,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad),market,0.112,52,,,2025-04-17
+GPT-4o (scratchpad with freeze values),market,0.079,118,,,2024-05-13
+GPT-4-Turbo-2024-04-09 (scratchpad with freeze values),market,0.082,118,,,2024-04-09
+Claude-3-5-Sonnet-20240620 (zero shot),market,0.108,400,,,2024-06-20
+Claude-3-5-Sonnet-20241022 (scratchpad),market,0.1,282,,,2024-10-22
+GPT-4o-2024-11-20 (zero shot with freeze values with web search),market,0.104,59,,,2024-11-20
+Claude-3-5-Sonnet-20241022 (zero shot),market,0.11,282,,,2024-10-22
+GPT-4.1-2025-04-14 (zero shot),market,0.115,52,,,2025-04-14
+O3-Mini-2025-01-31 (zero shot),market,0.118,223,,,2025-01-31
+Llama-4-Scout-17B-16E-Instruct (zero shot with freeze values),market,0.084,107,,,2025-04-05
+DeepSeek-R1 (scratchpad),market,0.119,282,,,2025-01-20
+Gemini-2.0-Flash-Lite-001 (scratchpad with freeze values),market,0.096,111,,,2025-02-05
+Claude-3-5-Sonnet-20240620 (scratchpad),market,0.111,400,,,2024-06-20
+GPT-4o (zero shot with freeze values),market,0.068,118,,,2024-05-13
+GPT-4o-2024-05-13 (zero shot),market,0.101,163,,,2024-05-13
+GPT-4o (scratchpad with news with freeze values),market,0.086,118,,,2024-05-13
+Gemini-1.5-Pro (scratchpad with freeze values),market,0.104,118,,,2024-05-01
+Llama-3-8b-Chat-Hf (zero shot with freeze values),market,0.08,118,,,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with freeze values),market,0.108,118,,,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (zero shot),market,0.101,282,,,2024-12-06
+Qwen1.5-110B-Chat (zero shot with freeze values),market,0.086,118,,,2024-04-25
+GPT-4-Turbo-2024-04-09 (zero shot),market,0.109,118,,,2024-04-09
+Claude-3-7-Sonnet-20250219 (zero shot),market,0.128,282,,,2025-02-24
+Claude-3-5-Sonnet-20240620 (scratchpad with news),market,0.117,118,,,2024-06-20
+DeepSeek-V3 (zero shot),market,0.122,282,,,2024-12-25
+Mistral-Large-2407 (zero shot),market,0.112,163,,,2024-07-24
+Llama-3-70b-Chat-Hf (zero shot with freeze values),market,0.08,118,,,2024-04-18
+QwQ-32B-Preview (scratchpad),market,0.109,163,,,2024-11-28
+Claude-3-5-Sonnet-20240620 (superforecaster with news 3),market,0.107,118,,,2024-06-20
+Gemini-1.5-Pro (scratchpad),market,0.117,118,,,2024-05-01
+GPT-4 (scratchpad with freeze values),market,0.101,118,,,2023-03-14
+DeepSeek-V3 (scratchpad),market,0.131,59,,,2024-12-25
+GPT-4-Turbo-2024-04-09 (scratchpad with news with freeze values),market,0.097,118,,,2024-04-09
+Mixtral-8x22B-Instruct-V0.1 (zero shot with freeze values),market,0.086,118,,,2024-04-01
+Claude-2.1 (zero shot with freeze values),market,0.075,118,,,2023-11-21
+Llama-4-Scout-17B-16E-Instruct (zero shot),market,0.107,107,,,2025-04-05
+GPT-4o-2024-11-20 (scratchpad with freeze values with web search),market,0.126,59,,,2024-11-20
+Mistral-Large-Latest (zero shot with freeze values),market,0.092,118,,,2024-02-26
+Gemini-1.5-Flash (zero shot with freeze values),market,0.086,118,,,2024-05-01
+Mistral-Large-Latest (scratchpad with freeze values),market,0.11,118,,,2024-02-26
+Imputed Forecaster,market,0.052,400,,,
+GPT-4o-2024-11-20 (scratchpad with web search),market,0.13,59,,,2024-11-20
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with freeze values),market,0.106,118,,,2024-04-17
+Mixtral-8x7B-Instruct-V0.1 (zero shot with freeze values),market,0.089,118,,,2023-12-11
+GPT-4-Turbo-2024-04-09 (scratchpad),market,0.119,118,,,2024-04-09
+Gemini-1.5-Pro (scratchpad with news with freeze values),market,0.121,118,,,2024-05-01
+GPT-4o (scratchpad with news),market,0.114,118,,,2024-05-13
+GPT-4o (scratchpad),market,0.122,118,,,2024-05-13
+Llama-3-8b-Chat-Hf (zero shot),market,0.105,118,,,2024-04-18
+Llama-3.3-70B-Instruct-Turbo (scratchpad),market,0.133,282,,,2024-12-06
+GPT-4o-2024-11-20 (zero shot with web search),market,0.143,59,,,2024-11-20
+Llama-3-70b-Chat-Hf (scratchpad with freeze values),market,0.102,118,,,2024-04-18
+GPT-4-Turbo-2024-04-09 (scratchpad with news),market,0.119,118,,,2024-04-09
+Qwen1.5-110B-Chat (scratchpad with freeze values),market,0.13,118,,,2024-04-25
+GPT-4 (scratchpad),market,0.128,118,,,2023-03-14
+Gemini-2.0-Flash-Lite-001 (scratchpad),market,0.138,111,,,2025-02-05
+O3-Mini-2025-01-31 (scratchpad),market,0.157,60,,,2025-01-31
+Gemini-1.5-Pro (scratchpad with news),market,0.134,118,,,2024-05-01
+Claude-3-Opus-20240229 (scratchpad),market,0.145,118,,,2024-02-29
+Qwen1.5-110B-Chat (scratchpad with news with freeze values),market,0.13,118,,,2024-04-25
+Naive Forecaster,market,0.052,400,,,
+Qwen1.5-110B-Chat (scratchpad),market,0.137,118,,,2024-04-25
+Claude-3-Opus-20240229 (zero shot),market,0.144,118,,,2024-02-29
+Gemini-1.5-Flash (scratchpad with freeze values),market,0.112,118,,,2024-05-01
+Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),market,0.114,118,,,2024-06-20
+GPT-4o (zero shot),market,0.116,118,,,2024-05-13
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news with freeze values),market,0.118,118,,,2024-04-17
+GPT-4o (superforecaster with news 1),market,0.117,118,,,2024-05-13
+Mistral-Large-Latest (scratchpad),market,0.143,118,,,2024-02-26
+GPT-4 (zero shot),market,0.149,118,,,2023-03-14
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news),market,0.13,118,,,2024-04-17
+Qwen1.5-110B-Chat (scratchpad with news),market,0.15,118,,,2024-04-25
+Mixtral-8x22B-Instruct-V0.1 (scratchpad),market,0.145,118,,,2024-04-17
+Claude-3-5-Sonnet-20240620 (superforecaster with news 2),market,0.137,118,,,2024-06-20
+Qwen1.5-110B-Chat (zero shot),market,0.148,118,,,2024-04-25
+Mistral-Large-Latest (zero shot),market,0.14,118,,,2024-02-26
+Mixtral-8x7B-Instruct-V0.1 (zero shot),market,0.13,118,,,2023-12-11
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",market,0.107,118,,,
+Llama-3-8b-Chat-Hf (scratchpad with freeze values),market,0.108,118,,,2024-04-18
+Gemini-2.0-Flash-Lite-001 (zero shot with freeze values),market,0.134,111,,,2025-02-05
+Llama-3-70b-Chat-Hf (zero shot),market,0.136,118,,,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with news with freeze values),market,0.145,118,,,2024-02-29
+Gemini-2.0-Flash-Lite-001 (zero shot),market,0.135,111,,,2025-02-05
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",market,0.11,118,,,
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",market,0.109,118,,,
+Gemini-1.5-Pro (superforecaster with news 3),market,0.147,118,,,2024-05-01
+Claude-3-Opus-20240229 (superforecaster with news 2),market,0.157,118,,,2024-02-29
+Mixtral-8x22B-Instruct-V0.1 (zero shot),market,0.148,118,,,2024-04-17
+Gemini-1.5-Flash (scratchpad with news with freeze values),market,0.129,118,,,2024-05-01
+GPT-4-Turbo-2024-04-09 (superforecaster with news 1),market,0.154,118,,,2024-04-09
+Mistral-Large-Latest (scratchpad with news with freeze values),market,0.149,118,,,2024-02-26
+Claude-3-Opus-20240229 (scratchpad with news),market,0.161,118,,,2024-02-29
+Gemini-1.5-Flash (scratchpad),market,0.15,118,,,2024-05-01
+Mistral-Large-Latest (scratchpad with news),market,0.164,118,,,2024-02-26
+Claude-2.1 (scratchpad with news with freeze values),market,0.15,118,,,2023-11-21
+Llama-3-70b-Chat-Hf (scratchpad),market,0.169,118,,,2024-04-18
+Claude-2.1 (zero shot),market,0.161,118,,,2023-11-21
+Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),market,0.155,118,,,2024-04-17
+Gemini-1.5-Flash (scratchpad with news),market,0.159,118,,,2024-05-01
+Gemini-1.5-Flash (zero shot),market,0.178,118,,,2024-05-01
+Gemini-1.5-Pro (superforecaster with news 2),market,0.164,118,,,2024-05-01
+Mixtral-8x7B-Instruct-V0.1 (scratchpad),market,0.173,118,,,2023-12-11
+Llama-3-8b-Chat-Hf (scratchpad),market,0.167,118,,,2024-04-18
+Claude-3-Haiku-20240307 (zero shot with freeze values),market,0.113,118,,,2024-03-13
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with freeze values),market,0.201,118,,,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with freeze values),market,0.184,118,,,2024-03-13
+Llama-2-70b-Chat-Hf (scratchpad with freeze values),market,0.187,118,,,2023-07-18
+Llama-2-70b-Chat-Hf (scratchpad),market,0.19,118,,,2023-07-18
+Claude-3-Haiku-20240307 (scratchpad),market,0.2,118,,,2024-03-13
+Llama-2-70b-Chat-Hf (zero shot with freeze values),market,0.197,118,,,2023-07-18
+Claude-3-Haiku-20240307 (zero shot),market,0.15,118,,,2024-03-13
+GPT-3.5-Turbo-0125 (scratchpad),market,0.197,118,,,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news with freeze values),market,0.191,118,,,2023-12-11
+GPT-3.5-Turbo-0125 (scratchpad with freeze values),market,0.198,118,,,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),market,0.193,118,,,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with news with freeze values),market,0.182,118,,,2024-03-13
+Claude-3-Haiku-20240307 (scratchpad with news),market,0.192,118,,,2024-03-13
+Always 0.5,market,0.25,400,,,
+GPT-3.5-Turbo-0125 (zero shot with freeze values),market,0.109,118,,,2024-01-25
+Always 0,market,0.143,400,,,
+Llama-2-70b-Chat-Hf (zero shot),market,0.286,118,,,2023-07-18
+GPT-3.5-Turbo-0125 (zero shot),market,0.225,118,,,2024-01-25
+Random Uniform,market,0.334,400,,,
+Always 1,market,0.858,400,,,
+Superforecaster median forecast,overall,0.077,580,0.057,0.096,
+GPT-4.5-Preview-2025-02-27 (zero shot with freeze values),overall,0.101,1910,0.094,0.108,2025-02-27
+GPT-4.5-Preview-2025-02-27 (scratchpad with freeze values),overall,0.102,1910,0.095,0.11,2025-02-27
+Claude-3-7-Sonnet-20250219 (scratchpad with freeze values),overall,0.104,4740,0.097,0.111,2025-02-24
+O3-2025-04-16 (zero shot with freeze values),overall,0.105,941,0.094,0.116,2025-04-16
+GPT-4.1-2025-04-14 (scratchpad with freeze values),overall,0.11,941,0.098,0.122,2025-04-14
+O3-2025-04-16 (scratchpad with freeze values),overall,0.111,941,0.1,0.122,2025-04-16
+O3-Mini-2025-01-31 (zero shot with freeze values),overall,0.111,3787,0.103,0.118,2025-01-31
+Claude-3-7-Sonnet-20250219 (zero shot with freeze values),overall,0.112,4740,0.105,0.119,2025-02-24
+DeepSeek-R1 (scratchpad with freeze values),overall,0.112,4740,0.106,0.119,2025-01-20
+Grok-2-1212 (zero shot with freeze values),overall,0.113,1889,0.105,0.12,2024-12-12
+Claude-3-5-Sonnet-20240620 (zero shot with freeze values),overall,0.115,6272,0.107,0.122,2024-06-20
+Public median forecast,overall,0.115,580,0.098,0.131,
+GPT-4-Turbo-2024-04-09 (zero shot with freeze values),overall,0.116,1532,0.105,0.126,2024-04-09
+Claude-3-5-Sonnet-20241022 (zero shot with freeze values),overall,0.116,4740,0.108,0.123,2024-10-22
+Claude-3-5-Sonnet-20241022 (scratchpad with freeze values),overall,0.116,4740,0.109,0.122,2024-10-22
+Grok-3-Mini-Beta (zero shot with freeze values),overall,0.116,941,0.104,0.127,2025-02-17
+Grok-3-Beta (zero shot with freeze values),overall,0.116,941,0.104,0.127,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad with freeze values),overall,0.116,941,0.103,0.129,2025-04-17
+Claude-3-5-Sonnet-20240620 (scratchpad with freeze values),overall,0.116,6272,0.109,0.123,2024-06-20
+GPT-4.1-2025-04-14 (zero shot with freeze values),overall,0.118,941,0.106,0.133,2025-04-14
+DeepSeek-V3 (zero shot with freeze values),overall,0.118,4740,0.111,0.125,2024-12-25
+O3-2025-04-16 (zero shot),overall,0.119,941,0.104,0.138,2025-04-16
+GPT-4.5-Preview-2025-02-27 (zero shot),overall,0.12,1910,0.109,0.131,2025-02-27
+Gemini-2.5-Flash-Preview-04-17 (zero shot),overall,0.12,941,0.106,0.138,2025-04-17
+O3-2025-04-16 (scratchpad),overall,0.122,941,0.109,0.14,2025-04-16
+Mistral-Large-2407 (zero shot with freeze values),overall,0.123,2830,0.115,0.13,2024-07-24
+Llama-3.3-70B-Instruct-Turbo (zero shot with freeze values),overall,0.124,4740,0.117,0.131,2024-12-06
+GPT-4o-2024-05-13 (zero shot with freeze values),overall,0.124,2830,0.114,0.133,2024-05-13
+GPT-4 (zero shot with freeze values),overall,0.124,1532,0.113,0.135,2023-03-14
+Claude-3-7-Sonnet-20250219 (scratchpad),overall,0.124,4740,0.117,0.132,2025-02-24
+QwQ-32B-Preview (scratchpad with freeze values),overall,0.124,2830,0.117,0.133,2024-11-28
+GPT-4.5-Preview-2025-02-27 (scratchpad),overall,0.124,1910,0.115,0.133,2025-02-27
+O3-Mini-2025-01-31 (scratchpad with freeze values),overall,0.125,957,0.117,0.134,2025-01-31
+Claude-3-Opus-20240229 (zero shot with freeze values),overall,0.125,1532,0.113,0.137,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (scratchpad with freeze values),overall,0.127,4740,0.12,0.134,2024-12-06
+Grok-2-1212 (zero shot),overall,0.128,1889,0.118,0.139,2024-12-12
+Claude-3-5-Sonnet-20240620 (scratchpad with news with freeze values),overall,0.128,1532,0.117,0.139,2024-06-20
+DeepSeek-V3 (scratchpad with freeze values),overall,0.128,953,0.116,0.14,2024-12-25
+Gemini-2.5-Flash-Preview-04-17 (zero shot with freeze values),overall,0.129,941,0.113,0.146,2025-04-17
+Grok-3-Beta (zero shot),overall,0.129,941,0.116,0.147,2025-02-17
+GPT-4.1-2025-04-14 (scratchpad),overall,0.13,941,0.114,0.15,2025-04-14
+Grok-3-Mini-Beta (zero shot),overall,0.13,941,0.118,0.145,2025-02-17
+Gemini-2.5-Flash-Preview-04-17 (scratchpad),overall,0.131,941,0.114,0.152,2025-04-17
+GPT-4o (scratchpad with freeze values),overall,0.132,1532,0.121,0.142,2024-05-13
+GPT-4-Turbo-2024-04-09 (scratchpad with freeze values),overall,0.133,1532,0.12,0.148,2024-04-09
+Claude-3-5-Sonnet-20240620 (zero shot),overall,0.135,6272,0.127,0.144,2024-06-20
+Claude-3-5-Sonnet-20241022 (scratchpad),overall,0.135,4740,0.127,0.144,2024-10-22
+GPT-4o-2024-11-20 (zero shot with freeze values with web search),overall,0.136,953,0.113,0.162,2024-11-20
+Claude-3-5-Sonnet-20241022 (zero shot),overall,0.136,4740,0.127,0.147,2024-10-22
+GPT-4.1-2025-04-14 (zero shot),overall,0.136,941,0.116,0.161,2025-04-14
+O3-Mini-2025-01-31 (zero shot),overall,0.137,3787,0.128,0.146,2025-01-31
+Llama-4-Scout-17B-16E-Instruct (zero shot with freeze values),overall,0.137,1881,0.128,0.146,2025-04-05
+DeepSeek-R1 (scratchpad),overall,0.138,4740,0.13,0.145,2025-01-20
+Gemini-2.0-Flash-Lite-001 (scratchpad with freeze values),overall,0.138,1889,0.126,0.151,2025-02-05
+Claude-3-5-Sonnet-20240620 (scratchpad),overall,0.138,6272,0.131,0.146,2024-06-20
+GPT-4o (zero shot with freeze values),overall,0.138,1532,0.127,0.151,2024-05-13
+GPT-4o-2024-05-13 (zero shot),overall,0.139,2830,0.13,0.148,2024-05-13
+GPT-4o (scratchpad with news with freeze values),overall,0.139,1532,0.128,0.151,2024-05-13
+Gemini-1.5-Pro (scratchpad with freeze values),overall,0.14,1532,0.13,0.151,2024-05-01
+Llama-3-8b-Chat-Hf (zero shot with freeze values),overall,0.141,1532,0.125,0.158,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with freeze values),overall,0.141,1532,0.13,0.152,2024-02-29
+Llama-3.3-70B-Instruct-Turbo (zero shot),overall,0.141,4740,0.133,0.15,2024-12-06
+Qwen1.5-110B-Chat (zero shot with freeze values),overall,0.141,1532,0.13,0.152,2024-04-25
+GPT-4-Turbo-2024-04-09 (zero shot),overall,0.142,1532,0.13,0.155,2024-04-09
+Claude-3-7-Sonnet-20250219 (zero shot),overall,0.142,4740,0.132,0.154,2025-02-24
+Claude-3-5-Sonnet-20240620 (scratchpad with news),overall,0.143,1532,0.132,0.154,2024-06-20
+DeepSeek-V3 (zero shot),overall,0.144,4740,0.137,0.152,2024-12-25
+Mistral-Large-2407 (zero shot),overall,0.145,2830,0.136,0.155,2024-07-24
+Llama-3-70b-Chat-Hf (zero shot with freeze values),overall,0.145,1532,0.133,0.157,2024-04-18
+QwQ-32B-Preview (scratchpad),overall,0.146,2830,0.138,0.154,2024-11-28
+Claude-3-5-Sonnet-20240620 (superforecaster with news 3),overall,0.146,1532,0.135,0.157,2024-06-20
+Gemini-1.5-Pro (scratchpad),overall,0.146,1532,0.133,0.161,2024-05-01
+GPT-4 (scratchpad with freeze values),overall,0.146,1532,0.135,0.157,2023-03-14
+DeepSeek-V3 (scratchpad),overall,0.147,953,0.134,0.161,2024-12-25
+GPT-4-Turbo-2024-04-09 (scratchpad with news with freeze values),overall,0.147,1532,0.134,0.161,2024-04-09
+Mixtral-8x22B-Instruct-V0.1 (zero shot with freeze values),overall,0.147,1532,0.133,0.161,2024-04-01
+Claude-2.1 (zero shot with freeze values),overall,0.147,1532,0.135,0.159,2023-11-21
+Llama-4-Scout-17B-16E-Instruct (zero shot),overall,0.148,1881,0.138,0.159,2025-04-05
+GPT-4o-2024-11-20 (scratchpad with freeze values with web search),overall,0.148,953,0.133,0.166,2024-11-20
+Mistral-Large-Latest (zero shot with freeze values),overall,0.148,1532,0.135,0.162,2024-02-26
+Gemini-1.5-Flash (zero shot with freeze values),overall,0.148,1532,0.134,0.164,2024-05-01
+Mistral-Large-Latest (scratchpad with freeze values),overall,0.15,1532,0.138,0.163,2024-02-26
+Imputed Forecaster,overall,0.151,6272,0.145,0.157,
+GPT-4o-2024-11-20 (scratchpad with web search),overall,0.151,953,0.135,0.168,2024-11-20
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with freeze values),overall,0.152,1532,0.14,0.164,2024-04-17
+Mixtral-8x7B-Instruct-V0.1 (zero shot with freeze values),overall,0.152,1532,0.137,0.168,2023-12-11
+GPT-4-Turbo-2024-04-09 (scratchpad),overall,0.152,1532,0.139,0.165,2024-04-09
+Gemini-1.5-Pro (scratchpad with news with freeze values),overall,0.153,1532,0.141,0.167,2024-05-01
+GPT-4o (scratchpad with news),overall,0.153,1532,0.14,0.166,2024-05-13
+GPT-4o (scratchpad),overall,0.153,1532,0.141,0.165,2024-05-13
+Llama-3-8b-Chat-Hf (zero shot),overall,0.154,1532,0.134,0.175,2024-04-18
+Llama-3.3-70B-Instruct-Turbo (scratchpad),overall,0.154,4740,0.147,0.162,2024-12-06
+GPT-4o-2024-11-20 (zero shot with web search),overall,0.156,953,0.131,0.181,2024-11-20
+Llama-3-70b-Chat-Hf (scratchpad with freeze values),overall,0.156,1532,0.146,0.166,2024-04-18
+GPT-4-Turbo-2024-04-09 (scratchpad with news),overall,0.157,1532,0.144,0.172,2024-04-09
+Qwen1.5-110B-Chat (scratchpad with freeze values),overall,0.157,1532,0.146,0.169,2024-04-25
+GPT-4 (scratchpad),overall,0.159,1532,0.148,0.171,2023-03-14
+Gemini-2.0-Flash-Lite-001 (scratchpad),overall,0.159,1889,0.149,0.17,2025-02-05
+O3-Mini-2025-01-31 (scratchpad),overall,0.159,957,0.147,0.17,2025-01-31
+Gemini-1.5-Pro (scratchpad with news),overall,0.16,1532,0.146,0.175,2024-05-01
+Claude-3-Opus-20240229 (scratchpad),overall,0.16,1532,0.147,0.173,2024-02-29
+Qwen1.5-110B-Chat (scratchpad with news with freeze values),overall,0.16,1532,0.149,0.172,2024-04-25
+Naive Forecaster,overall,0.161,6272,0.154,0.168,
+Qwen1.5-110B-Chat (scratchpad),overall,0.161,1532,0.151,0.173,2024-04-25
+Claude-3-Opus-20240229 (zero shot),overall,0.162,1532,0.146,0.179,2024-02-29
+Gemini-1.5-Flash (scratchpad with freeze values),overall,0.162,1532,0.15,0.175,2024-05-01
+Claude-3-5-Sonnet-20240620 (scratchpad with SECOND news),overall,0.162,1532,0.151,0.174,2024-06-20
+GPT-4o (zero shot),overall,0.162,1532,0.149,0.178,2024-05-13
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news with freeze values),overall,0.163,1532,0.151,0.176,2024-04-17
+GPT-4o (superforecaster with news 1),overall,0.164,1532,0.149,0.181,2024-05-13
+Mistral-Large-Latest (scratchpad),overall,0.166,1532,0.154,0.181,2024-02-26
+GPT-4 (zero shot),overall,0.168,1532,0.156,0.181,2023-03-14
+Mixtral-8x22B-Instruct-V0.1 (scratchpad with news),overall,0.169,1532,0.156,0.182,2024-04-17
+Qwen1.5-110B-Chat (scratchpad with news),overall,0.17,1532,0.158,0.183,2024-04-25
+Mixtral-8x22B-Instruct-V0.1 (scratchpad),overall,0.171,1532,0.16,0.186,2024-04-17
+Claude-3-5-Sonnet-20240620 (superforecaster with news 2),overall,0.172,1532,0.156,0.187,2024-06-20
+Qwen1.5-110B-Chat (zero shot),overall,0.172,1532,0.16,0.186,2024-04-25
+Mistral-Large-Latest (zero shot),overall,0.172,1532,0.156,0.189,2024-02-26
+Mixtral-8x7B-Instruct-V0.1 (zero shot),overall,0.173,1532,0.154,0.193,2023-12-11
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean with news",overall,0.173,1532,0.163,0.182,
+Llama-3-8b-Chat-Hf (scratchpad with freeze values),overall,0.173,1532,0.161,0.184,2024-04-18
+Gemini-2.0-Flash-Lite-001 (zero shot with freeze values),overall,0.173,1889,0.154,0.196,2025-02-05
+Llama-3-70b-Chat-Hf (zero shot),overall,0.173,1532,0.159,0.188,2024-04-18
+Claude-3-Opus-20240229 (scratchpad with news with freeze values),overall,0.173,1532,0.16,0.186,2024-02-29
+Gemini-2.0-Flash-Lite-001 (zero shot),overall,0.174,1889,0.158,0.191,2025-02-05
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) median with news",overall,0.174,1532,0.165,0.185,
+"LLM Crowd (gpt-4o, claude-3.5-sonnet, gemini-1.5-pro) geometric mean log odds with news",overall,0.174,1532,0.165,0.184,
+Gemini-1.5-Pro (superforecaster with news 3),overall,0.175,1532,0.16,0.19,2024-05-01
+Claude-3-Opus-20240229 (superforecaster with news 2),overall,0.176,1532,0.16,0.192,2024-02-29
+Mixtral-8x22B-Instruct-V0.1 (zero shot),overall,0.178,1532,0.163,0.195,2024-04-17
+Gemini-1.5-Flash (scratchpad with news with freeze values),overall,0.179,1532,0.164,0.194,2024-05-01
+GPT-4-Turbo-2024-04-09 (superforecaster with news 1),overall,0.18,1532,0.164,0.197,2024-04-09
+Mistral-Large-Latest (scratchpad with news with freeze values),overall,0.18,1532,0.165,0.194,2024-02-26
+Claude-3-Opus-20240229 (scratchpad with news),overall,0.181,1532,0.168,0.194,2024-02-29
+Gemini-1.5-Flash (scratchpad),overall,0.181,1532,0.167,0.196,2024-05-01
+Mistral-Large-Latest (scratchpad with news),overall,0.187,1532,0.173,0.202,2024-02-26
+Claude-2.1 (scratchpad with news with freeze values),overall,0.188,1532,0.173,0.202,2023-11-21
+Llama-3-70b-Chat-Hf (scratchpad),overall,0.189,1532,0.177,0.201,2024-04-18
+Claude-2.1 (zero shot),overall,0.19,1532,0.176,0.206,2023-11-21
+Mixtral-8x22B-Instruct-V0.1 (superforecaster with news 2),overall,0.192,1532,0.179,0.205,2024-04-17
+Gemini-1.5-Flash (scratchpad with news),overall,0.194,1532,0.178,0.21,2024-05-01
+Gemini-1.5-Flash (zero shot),overall,0.194,1532,0.178,0.213,2024-05-01
+Gemini-1.5-Pro (superforecaster with news 2),overall,0.195,1532,0.176,0.215,2024-05-01
+Mixtral-8x7B-Instruct-V0.1 (scratchpad),overall,0.197,1532,0.182,0.211,2023-12-11
+Llama-3-8b-Chat-Hf (scratchpad),overall,0.202,1532,0.188,0.216,2024-04-18
+Claude-3-Haiku-20240307 (zero shot with freeze values),overall,0.205,1532,0.193,0.216,2024-03-13
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with freeze values),overall,0.211,1532,0.194,0.229,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with freeze values),overall,0.214,1532,0.199,0.227,2024-03-13
+Llama-2-70b-Chat-Hf (scratchpad with freeze values),overall,0.216,1532,0.203,0.23,2023-07-18
+Llama-2-70b-Chat-Hf (scratchpad),overall,0.217,1532,0.202,0.233,2023-07-18
+Claude-3-Haiku-20240307 (scratchpad),overall,0.221,1532,0.206,0.236,2024-03-13
+Llama-2-70b-Chat-Hf (zero shot with freeze values),overall,0.223,1532,0.203,0.244,2023-07-18
+Claude-3-Haiku-20240307 (zero shot),overall,0.223,1532,0.211,0.236,2024-03-13
+GPT-3.5-Turbo-0125 (scratchpad),overall,0.228,1532,0.212,0.244,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news with freeze values),overall,0.229,1532,0.213,0.246,2023-12-11
+GPT-3.5-Turbo-0125 (scratchpad with freeze values),overall,0.229,1532,0.213,0.245,2024-01-25
+Mixtral-8x7B-Instruct-V0.1 (scratchpad with news),overall,0.23,1532,0.216,0.245,2023-12-11
+Claude-3-Haiku-20240307 (scratchpad with news with freeze values),overall,0.23,1532,0.215,0.244,2024-03-13
+Claude-3-Haiku-20240307 (scratchpad with news),overall,0.235,1532,0.221,0.249,2024-03-13
+Always 0.5,overall,0.25,6272,0.25,0.25,
+GPT-3.5-Turbo-0125 (zero shot with freeze values),overall,0.262,1532,0.243,0.281,2024-01-25
+Always 0,overall,0.267,6272,0.25,0.284,
+Llama-2-70b-Chat-Hf (zero shot),overall,0.268,1532,0.247,0.29,2023-07-18
+GPT-3.5-Turbo-0125 (zero shot),overall,0.32,1532,0.298,0.343,2024-01-25
+Random Uniform,overall,0.333,6272,0.317,0.347,
+Always 1,overall,0.733,6272,0.716,0.75,

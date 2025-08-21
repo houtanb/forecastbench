@@ -415,16 +415,17 @@
     
     function referenceTooltipHTML(label, score, baselines, baselineType) {
       let title, hasCI = false, lb, ub;
+      let baselineRow = null;
       
       if (label === 'Always 0.5') {
         title = 'Always Predict 0.5';
       } else if (label === 'Public') {
         title = 'Public Median Forecast';
+        baselineRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
         // Get CI from original CSV data, but only show for 'overall'
-        const publicRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        if (publicRow && baselineType === 'overall') {
-          const lbRaw = publicRow.conf_int_lb;
-          const ubRaw = publicRow.conf_int_ub;
+        if (baselineRow && baselineType === 'overall') {
+          const lbRaw = baselineRow.conf_int_lb;
+          const ubRaw = baselineRow.conf_int_ub;
           const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
           const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
           if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
@@ -435,11 +436,11 @@
         }
       } else if (label === 'Superforecaster') {
         title = 'Superforecaster Median Forecast';
+        baselineRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
         // Get CI from original CSV data, but only show for 'overall'
-        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        if (superRow && baselineType === 'overall') {
-          const lbRaw = superRow.conf_int_lb;
-          const ubRaw = superRow.conf_int_ub;
+        if (baselineRow && baselineType === 'overall') {
+          const lbRaw = baselineRow.conf_int_lb;
+          const ubRaw = baselineRow.conf_int_ub;
           const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
           const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
           if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
@@ -450,11 +451,11 @@
         }
       } else if (label === 'Market') {
         title = 'Market Forecast';
+        baselineRow = originalRows.find(d => d.model === 'Imputed Forecaster' && (d.type||'').trim().toLowerCase() === baselineType);
         // Get CI from original CSV data, but only show for 'overall'
-        const imputedRow = originalRows.find(d => d.model === 'Imputed Forecaster' && (d.type||'').trim().toLowerCase() === baselineType);
-        if (imputedRow && baselineType === 'overall') {
-          const lbRaw = imputedRow.conf_int_lb;
-          const ubRaw = imputedRow.conf_int_ub;
+        if (baselineRow && baselineType === 'overall') {
+          const lbRaw = baselineRow.conf_int_lb;
+          const ubRaw = baselineRow.conf_int_ub;
           const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
           const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
           if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
@@ -465,6 +466,17 @@
         }
       }
       
+      // Parse sample size for the selected baseline and type
+      let hasN = false, nVal;
+      if (baselineRow) {
+        const nRaw = baselineRow.sample_size;
+        const nNum = (nRaw === undefined || nRaw === null || String(nRaw).trim() === '') ? NaN : +nRaw;
+        if (Number.isFinite(nNum)) {
+          hasN = true;
+          nVal = nNum;
+        }
+      }
+      
       let html = `
         <div><strong>${title}</strong></div>
         <div>Diff-Adj. Brier: ${fmt(score)}</div>
@@ -472,6 +484,9 @@
       
       if (hasCI) {
         html += `<div>95% CI: [${fmt(lb)}, ${fmt(ub)}]</div>`;
+      }
+      if (hasN) {
+        html += `<div>Sample Size: ${nVal}</div>`;
       }
       
       return html;

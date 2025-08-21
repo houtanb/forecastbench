@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>SOTA Models Over Time</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>
+  /* ---------- THEME VARIABLES (site can override these later) ---------- */
+  :root{
+    --sota-bg: #ffffff;
+    --sota-text: #1f2a37;
+    --sota-grid: #eef2f6;
+    --sota-axes: #6b7280;
+    --sota-point: #93a3b5;       /* non-SOTA dots */
+    --sota-sota: #d65936;        /* SOTA fill */
+    --sota-sota-ring: #d65936;   /* SOTA ring */
+    --sota-error: #b94725;       /* error bars */
+    --sota-ref: #94a3b8;         /* reference line labels */
+    --sota-ref-line: #d1d5db;    /* reference line stroke */
+    --sota-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+
+  html, body { margin:0; padding:0; background:var(--sota-bg); color:var(--sota-text); font-family:var(--sota-font); }
+  .wrap { max-width: 1100px; margin: 24px auto 40px auto; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 6px 0; font-weight: 650; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 12px; }
+
+  /* SVG styles */
+  .grid line { stroke: var(--sota-grid); stroke-width: 1; }
+  .axis path, .axis line { stroke: var(--sota-axes); stroke-width: 1; shape-rendering: crispEdges; }
+  .axis text { fill: var(--sota-axes); font-size: 12px; }
+  .ylabel, .xlabel { fill: var(--sota-axes); font-size: 12px; }
+
+  .refline { stroke: var(--sota-ref-line); stroke-width: 1; stroke-dasharray: 4 4; }
+  .reflabel { fill: var(--sota-ref); font-size: 12px; }
+  .trend-line { stroke: var(--sota-sota); stroke-width: 2; stroke-dasharray: 8,4; opacity: 0.7; }
+  .legend-text { fill: var(--sota-text); font-size: 11px; }
+
+  .point-all { fill: var(--sota-point); fill-opacity: 0.9; }
+  .point-sota { fill: var(--sota-sota); }
+  .point-ring { fill: none; stroke: var(--sota-sota-ring); stroke-width: 2; }
+  .errorbar { stroke: var(--sota-error); stroke-width: 2; }
+  .lab { font-size: 11px; text-anchor: middle; fill: var(--sota-text); }
+
+  .tooltip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .12s ease-out;
+    background: #0b1220; color: white; font-size: 12px; line-height: 1.35; padding: 8px 10px; border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(0,0,0,.25);
+  }
+
+  /* Drag & drop fallback UI when local file fetch is blocked */
+  .drop {
+    display:none; margin-top: 10px; border: 1.5px dashed #cbd5e1; border-radius: 10px;
+    padding: 14px; color:#475569; font-size: 13px; text-align:center;
+  }
+  .drop.show { display:block; }
+  .drop strong { color:#0f172a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>State-of-the-Art LLMs: Improvement Over Time</h1>
+  <div class="sub">Difficulty-Adjusted Brier (lower is better)</div>
+  <div id="chart"></div>
+  <div id="drop" class="drop">Couldn’t auto-load <strong>sota_graph.csv</strong> (some browsers block local file reads).<br>
+    Drag & drop your <strong>sota_graph.csv</strong> here, or run <code>python -m http.server</code> in this folder and refresh.
+  </div>
+</div>
+
+<div id="tip" class="tooltip"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script>
+(function(){
+  const CSV_PATH = 'sota_graph.csv';              // looks in the same folder
+  const Y_DOMAIN = [0.05, 0.35];            // configurable (lower = better)
+  const SHOW_REFS = true;                   // baseline lines
+
+  const fmt = d3.format('.3f');
+  const fmtDate = d3.timeFormat('%Y-%m-%d');
+
+  const dropEl = document.getElementById('drop');
+  const tip = d3.select('#tip');
+
+  // --- Short label mapping for SOTA annotations ---
+  function shortLabel(name){
+    const base = name.split(' (')[0];
+    const map = [
+      [/gpt-4\.5/i, 'GPT-4.5'],
+      [/gpt-4o/i, 'GPT-4o'],
+      [/gpt-4\.1/i, 'GPT-4.1'],
+      [/gpt-4-turbo/i, 'GPT-4 Turbo'],
+      [/gpt-4/i, 'GPT-4'],
+      [/gpt-3\.5/i, 'GPT-3.5'],
+      [/claude-?(\d(?:\.\d)?)?/i, (_,v)=> v?`Claude ${v}`:'Claude'],
+      [/gemini-?(\d(?:\.\d)?)?/i, (_,v)=> v?`Gemini ${v}`:'Gemini'],
+      [/llama-?(\d(?:\.\d)?)?/i,  (_,v)=> v?`Llama ${v}`:'Llama'],
+      [/grok[- ]?(\d(?:\.\d)?)?/i, (_,v)=> v?`Grok ${v}`:'Grok'],
+      [/deepseek[- ]?(r1|v3|coder|chat)?/i,(_,v)=> `DeepSeek${v?' '+v.toUpperCase():''}`],
+      [/mistral(?:[- ]large)?/i, (m)=> m.replace('-',' ')],
+      [/mixtral/i, 'Mixtral'],
+      [/o3[- ]?mini/i, 'o3-mini'],
+      [/o3\b/i, 'o3'],
+    ];
+    for (const [re,val] of map){
+      const m = base.match(re); if (m) return (typeof val==='function')? val(...m): val;
+    }
+    return base.split(/[-_ ]+/).slice(0,2).join(' ').slice(0,18);
+  }
+
+  // --- Compute SOTA-at-release flag from the 5 columns ---
+  function markSOTA(rows){
+    rows.sort((a,b)=> d3.ascending(a.release_date,b.release_date));
+    let best = Infinity, tol = 1e-12;
+    for (const r of rows){
+      r.is_sota_at_release = r.overall_score < best - tol;
+      best = Math.min(best, r.overall_score);
+    }
+  }
+
+  // --- Main draw ---
+  function draw(data, baselines = {}){
+    const container = document.getElementById('chart');
+    container.innerHTML = '';  // clear for re-render (drag-drop)
+    const W = Math.min(container.clientWidth || 1100, 1100);
+    const H = 560;
+    const margin = {top: 16, right: 24, bottom: 60, left: 64};
+    const width = W - margin.left - margin.right;
+    const height = H - margin.top - margin.bottom;
+
+    const svg = d3.select(container).append('svg')
+      .attr('viewBox', `0 0 ${W} ${H}`)
+      .attr('width', '100%')
+      .attr('height', H)
+      .attr('role','img')
+      .attr('aria-label','SOTA models over time');
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Extend x-axis domain by 1 month on each side
+    const [minDate, maxDate] = d3.extent(data, d => d.release_date);
+    const extendedMinDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, minDate.getDate());
+    const extendedMaxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, maxDate.getDate());
+    
+    const x = d3.scaleTime()
+      .domain([extendedMinDate, extendedMaxDate])
+      .range([0, width]);
+
+    const y = d3.scaleLinear()
+      .domain(Y_DOMAIN).nice()
+      .range([height, 0]);
+
+    // grid
+    g.append('g').attr('class','grid')
+      .attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(x).ticks(10).tickSize(-height).tickFormat(''))
+      .selectAll('line').attr('stroke-opacity',1);
+    g.append('g').attr('class','grid')
+      .call(d3.axisLeft(y).ticks(8).tickSize(-width).tickFormat(''))
+      .selectAll('line').attr('stroke-opacity',1);
+
+    // axes
+    g.append('g').attr('class','axis')
+      .attr('transform', `translate(0,${height})`)
+      .call(d3.axisBottom(x).tickFormat(d3.timeFormat('%b %Y')));
+    g.append('g').attr('class','axis').call(d3.axisLeft(y));
+
+    // axis labels
+    g.append('text').attr('class','xlabel').attr('x', width/2).attr('y', height+44)
+      .attr('text-anchor','middle').text('Model Release Date');
+    g.append('text').attr('class','ylabel')
+      .attr('transform','rotate(-90)')
+      .attr('x', -height/2).attr('y', -46)
+      .attr('text-anchor','middle')
+      .text('Difficulty-Adjusted Brier Score (Lower = Better)');
+
+    // reference lines
+    if (SHOW_REFS){
+      const refs = [
+        {y:0.25,  label:'Always 0.5'}
+      ];
+      
+      // Only add baseline reference lines if they exist in the data
+      if (baselines.public !== undefined) {
+        refs.push({y:baselines.public, label:'Public'});
+      }
+      if (baselines.superforecaster !== undefined) {
+        refs.push({y:baselines.superforecaster, label:'Superforecaster'});
+      }
+      for (const r of refs){
+        g.append('line').attr('class','refline')
+         .attr('x1',0).attr('x2',width).attr('y1',y(r.y)).attr('y2',y(r.y));
+        g.append('text').attr('class','reflabel')
+         .attr('x',4).attr('y',y(r.y)-4).text(r.label);
+        
+        // Add invisible hover area for tooltip
+        g.append('rect')
+         .attr('x', 0).attr('width', width)
+         .attr('y', y(r.y) - 8).attr('height', 16)
+         .attr('fill', 'transparent')
+         .style('cursor', 'pointer')
+         .on('mouseenter', (ev) => tipOn(ev, referenceTooltipHTML(r.label, r.y, baselines)))
+         .on('mouseleave', tipOff);
+      }
+    }
+
+    function tipOn(event, html){
+      tip.html(html).style('opacity',1);
+      const [mx, my] = d3.pointer(event, document.body);
+      tip.style('left', (mx+12)+'px').style('top', (my+12)+'px');
+    }
+    function tipOff(){ tip.style('opacity',0); }
+
+    // points not SOTA
+    const rest = data.filter(d => !d.is_sota_at_release);
+    g.selectAll('.point-all').data(rest).join('circle')
+      .attr('class','point-all')
+      .attr('r', 4.5)
+      .attr('cx', d => x(d.release_date))
+      .attr('cy', d => y(d.overall_score))
+      .on('mouseenter', (ev,d) => tipOn(ev, tooltipHTML(d)))
+      .on('mouseleave', tipOff);
+
+    // SOTA error bars with horizontal caps
+    const sota = data.filter(d => d.is_sota_at_release);
+    
+    // Calculate linear regression for SOTA models
+    function calculateRegression(sotaData) {
+      const n = sotaData.length;
+      if (n < 2) return null;
+      
+      // Convert dates to numeric values (days since epoch)
+      const xVals = sotaData.map(d => d.release_date.getTime());
+      const yVals = sotaData.map(d => d.overall_score);
+      
+      const xMean = d3.mean(xVals);
+      const yMean = d3.mean(yVals);
+      
+      let numerator = 0;
+      let denominator = 0;
+      
+      for (let i = 0; i < n; i++) {
+        const xDiff = xVals[i] - xMean;
+        const yDiff = yVals[i] - yMean;
+        numerator += xDiff * yDiff;
+        denominator += xDiff * xDiff;
+      }
+      
+      const slope = numerator / denominator;
+      const intercept = yMean - slope * xMean;
+      
+      return { slope, intercept };
+    }
+    
+    const regression = calculateRegression(sota);
+    
+    // Add regression trend line if we have enough SOTA points
+    if (regression && sota.length >= 2) {
+      const xRange = x.domain();
+      const trendData = xRange.map(date => ({
+        x: date,
+        y: regression.slope * date.getTime() + regression.intercept
+      }));
+      
+      g.append('line')
+        .attr('class', 'trend-line')
+        .attr('x1', x(trendData[0].x))
+        .attr('y1', y(trendData[0].y))
+        .attr('x2', x(trendData[1].x))
+        .attr('y2', y(trendData[1].y))
+        .style('stroke', 'var(--sota-sota)')
+        .style('stroke-width', '2')
+        .style('stroke-dasharray', '8,4')
+        .style('opacity', '0.7');
+    }
+    
+    // Vertical line for error bars
+    g.selectAll('.errorbar').data(sota).join('line')
+      .attr('class','errorbar')
+      .attr('x1', d => x(d.release_date)).attr('x2', d => x(d.release_date))
+      .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_ub));
+    
+    // Top horizontal caps
+    g.selectAll('.errorbar-top').data(sota).join('line')
+      .attr('class','errorbar')
+      .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
+      .attr('y1', d => y(d.conf_int_ub)).attr('y2', d => y(d.conf_int_ub));
+    
+    // Bottom horizontal caps
+    g.selectAll('.errorbar-bottom').data(sota).join('line')
+      .attr('class','errorbar')
+      .attr('x1', d => x(d.release_date) - 3).attr('x2', d => x(d.release_date) + 3)
+      .attr('y1', d => y(d.conf_int_lb)).attr('y2', d => y(d.conf_int_lb));
+
+    // SOTA points (same size as non-SOTA, different color only)
+    const sg = g.append('g');
+    sg.selectAll('circle.sota').data(sota).join('circle')
+      .attr('class','point-sota')
+      .attr('r', 4.5)
+      .attr('cx', d => x(d.release_date))
+      .attr('cy', d => y(d.overall_score))
+      .on('mouseenter', (ev,d) => tipOn(ev, tooltipHTML(d)))
+      .on('mouseleave', tipOff);
+
+    // SOTA labels with simple collision-avoidance (keep newest labels)
+    const labels = sg.selectAll('text.lab').data(sota).join('text')
+      .attr('class','lab')
+      .attr('x', d => x(d.release_date))
+      .attr('y', d => y(d.overall_score) + 18)
+      .text(d => shortLabel(d.model));
+
+    const nodes = labels.nodes()
+      .map((node,i)=>({node, d:sota[i]}))
+      .sort((a,b)=> d3.descending(a.d.release_date, b.d.release_date));
+    const kept = [];
+    for (const {node} of nodes){
+      const bb = node.getBBox();
+      const x0 = +node.getAttribute('x') - bb.width/2;
+      const y0 = +node.getAttribute('y') - bb.height/2;
+      const box = {x:x0, y:y0, w:bb.width, h:bb.height};
+      const collide = kept.some(k => !(box.x+box.w<k.x || k.x+k.w<box.x || box.y+box.h<k.y || k.y+k.h<box.y));
+      if (!collide) kept.push(box); else node.style.display = 'none';
+    }
+    
+    // Add legend
+    const legendX = width - 150;
+    const legendY = 20;
+    const legend = g.append('g')
+      .attr('class', 'legend')
+      .attr('transform', `translate(${legendX}, ${legendY})`);
+    
+    // Legend background
+    legend.append('rect')
+      .attr('x', -8)
+      .attr('y', -8)
+      .attr('width', 145)
+      .attr('height', 68)
+      .attr('fill', 'var(--sota-bg)')
+      .attr('stroke', 'var(--sota-grid)')
+      .attr('stroke-width', 1)
+      .attr('rx', 4);
+    
+    // Trend line sample
+    if (regression && sota.length >= 2) {
+      legend.append('line')
+        .attr('x1', 5).attr('x2', 25)
+        .attr('y1', 8).attr('y2', 8)
+        .attr('class', 'trend-line');
+      legend.append('text')
+        .attr('x', 30).attr('y', 12)
+        .attr('class', 'legend-text')
+        .text('Linear Trend');
+    }
+    
+    // SOTA model sample
+    legend.append('circle')
+      .attr('cx', 15).attr('cy', 28)
+      .attr('r', 4.5)
+      .attr('class', 'point-sota');
+    legend.append('text')
+      .attr('x', 30).attr('y', 32)
+      .attr('class', 'legend-text')
+      .text('SOTA Model');
+    
+    // Non-SOTA model sample
+    legend.append('circle')
+      .attr('cx', 15).attr('cy', 48)
+      .attr('r', 4.5)
+      .attr('class', 'point-all');
+    legend.append('text')
+      .attr('x', 30).attr('y', 52)
+      .attr('class', 'legend-text')
+      .text('Non-SOTA Model');
+
+    function tooltipHTML(d){
+      return `
+        <div><strong>${d.model}</strong></div>
+        <div>Release Date: ${fmtDate(d.release_date)}</div>
+        <div>Diff-Adj. Brier: ${fmt(d.overall_score)}</div>
+        <div>95% CI: [${fmt(d.conf_int_lb)}, ${fmt(d.conf_int_ub)}]</div>
+      `;
+    }
+    
+    function referenceTooltipHTML(label, score, baselines) {
+      let title, hasCI = false, lb, ub;
+      
+      if (label === 'Always 0.5') {
+        title = 'Always Predict 0.5';
+      } else if (label === 'Public') {
+        title = 'Public Median Forecast';
+        // Get CI from original CSV data
+        const publicRow = originalRows.find(d => d.model === 'Public median forecast');
+        if (publicRow) {
+          hasCI = true;
+          lb = +publicRow.conf_int_lb;
+          ub = +publicRow.conf_int_ub;
+        }
+      } else if (label === 'Superforecaster') {
+        title = 'Superforecaster Median Forecast';
+        // Get CI from original CSV data  
+        const superRow = originalRows.find(d => d.model === 'Superforecaster median forecast');
+        if (superRow) {
+          hasCI = true;
+          lb = +superRow.conf_int_lb;
+          ub = +superRow.conf_int_ub;
+        }
+      }
+      
+      let html = `
+        <div><strong>${title}</strong></div>
+        <div>Diff-Adj. Brier: ${fmt(score)}</div>
+      `;
+      
+      if (hasCI) {
+        html += `<div>95% CI: [${fmt(lb)}, ${fmt(ub)}]</div>`;
+      }
+      
+      return html;
+    }
+  }
+
+  // --- Load CSV (auto) with drag-drop fallback for file:// ---
+  let originalRows = []; // Store original rows for tooltip access
+  
+  function parseRows(rows){
+    originalRows = rows; // Store for tooltip access
+    
+    // Extract baseline values from CSV for reference lines
+    const superforecasterRow = rows.find(d => d.model === 'Superforecaster median forecast');
+    const publicRow = rows.find(d => d.model === 'Public median forecast');
+    
+    // Filter out rows with empty release dates (these are baselines, not temporal models)
+    const filtered = rows.filter(d => d.release_date && d.release_date.trim() !== '');
+    
+    const parsed = filtered.map(d => ({
+      model: d.model,
+      overall_score: +d.overall_score,
+      release_date: new Date(d.release_date),
+      conf_int_lb: +d.conf_int_lb,
+      conf_int_ub: +d.conf_int_ub
+    }));
+    
+    // Extract baseline scores for reference lines (only if available)
+    const baselines = {};
+    if (superforecasterRow) {
+      baselines.superforecaster = +superforecasterRow.overall_score;
+    }
+    if (publicRow) {
+      baselines.public = +publicRow.overall_score;
+    }
+    
+    markSOTA(parsed);
+    draw(parsed, baselines);
+  }
+
+  function tryFetch(){
+    d3.csv(CSV_PATH).then(parseRows).catch(err => {
+      console.warn('Could not fetch CSV (likely file:// CORS). Enable drag-drop.', err);
+      enableDropZone();
+    });
+  }
+
+  function enableDropZone(){
+    dropEl.classList.add('show');
+    ['dragenter','dragover'].forEach(ev =>
+      document.body.addEventListener(ev, e => { e.preventDefault(); e.dataTransfer.dropEffect='copy'; })
+    );
+    document.body.addEventListener('drop', e => {
+      e.preventDefault();
+      const f = Array.from(e.dataTransfer.files || []).find(f => /\.csv$/i.test(f.name));
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result;
+        const rows = d3.csvParse(text);
+        dropEl.classList.remove('show');
+        parseRows(rows);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+  tryFetch();
+})();
+</script>
+</body>
+</html>

@@ -8,10 +8,10 @@ RUN apt-get update && \
     gem install jekyll bundler minimal-mistakes-jekyll && \
     bundle install && \
     apt-get install -y apt-transport-https ca-certificates gnupg curl git openssh-client lsb-release && \
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
     tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-    apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+    gpg --dearmor | tee /usr/share/keyrings/cloud.google.gpg >/dev/null && \
     apt-get update && \
     apt-get install -y google-cloud-sdk dumb-init
 

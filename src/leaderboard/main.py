@@ -1473,6 +1473,7 @@ def add_x_pct_oracles(df: pd.DataFrame) -> pd.DataFrame:
         x_pct_oracle.loc[x_pct_oracle["resolved_to"] == 1, "forecast"] = pct
         x_pct_oracle.loc[x_pct_oracle["resolved_to"] == 0, "forecast"] = 1 - pct
         df_unset = x_pct_oracle[x_pct_oracle["forecast"] < 0]
+        x_pct_oracle = x_pct_oracle[x_pct_oracle["forecast"] >= 0]
         if not df_unset.empty:
             logger.warning(
                 df_unset[
@@ -1490,11 +1491,9 @@ def add_x_pct_oracles(df: pd.DataFrame) -> pd.DataFrame:
             pd.set_option("display.max_columns", None)
             pd.set_option("display.width", None)
 
+            logger.info("\nOne of the resolved_to values was not 0 or 1")
             for _, row in df_unset.iterrows():
-                print()
-                print(row.to_string())
-
-            raise ValueError("One of the resolved_to values was not 0 or 1")
+                logger.info(row.to_string())
 
         df = pd.concat([df, x_pct_oracle], ignore_index=True)
 

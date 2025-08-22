@@ -704,7 +704,8 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, test_o
         new_file_name = f"{directory}/{forecast_due_date}.{org}.{model}_{file_prompt_type}.json"
         if test_or_prod == "TEST":
             new_file_name = (
-                f"{directory}/TEST.{forecast_due_date}.{org}.{model}_{file_prompt_type}.json"
+                f"{directory}/{constants.TEST_FORECAST_FILE_PREFIX}.{forecast_due_date}."
+                f"{org}.{model}_{file_prompt_type}.json"
             )
 
         model_name = (
@@ -714,8 +715,9 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, test_o
         )
 
         forecast_file = {
-            "organization": org,
+            "organization": constants.BENCHMARK_NAME,
             "model": f"{capitalize_substrings(model_name)} ({file_prompt_type.replace('_', ' ')})",
+            "model_organization": org,
             "question_set": f"{forecast_due_date}-llm.json",
             "forecast_due_date": forecast_due_date,
             "forecasts": questions,

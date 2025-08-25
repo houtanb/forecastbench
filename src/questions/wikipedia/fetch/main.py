@@ -3,13 +3,17 @@
 import logging
 import os
 import sys
-import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from io import BytesIO
+from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 from tqdm import tqdm
+from urllib3.util.retry import Retry
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))
 from helpers import data_utils, decorator, env, wikipedia  # noqa: E402
@@ -24,24 +28,28 @@ source = "wikipedia"
 filenames = data_utils.generate_filenames(source=source)
 
 
-def get_edit_history_urls(page_title):
+SESSION = requests.Session()
+SESSION.headers.update(wikipedia.HEADERS)
+_retry = Retry(total=3, backoff_factor=0.25, status_forcelist=[429, 500, 502, 503, 504])
+SESSION.mount("https://", HTTPAdapter(pool_connections=8, pool_maxsize=8, max_retries=_retry))
+
+
+def get_edit_history(page_title):
     """Get the edit history of a wikipedia page.
 
     Get the last edit of the day for each day between today and
     wikipedia.WIKIPEDIA_QUESTION_BANK_DATA_STORAGE_START_DATE
     """
     base_history_url = (
-        f"https://en.wikipedia.org/w/index.php?title={page_title}&action=history&limit=20"
+        f"https://en.wikipedia.org/w/index.php?title={page_title}&action=history&limit=200"
     )
     offset = ""
     edit_history = []
     last_seen_dates = set()
 
     while True:
-        time.sleep(1)
-
         history_url = base_history_url + offset
-        response = requests.get(history_url, headers=wikipedia.HEADERS)
+        response = SESSION.get(history_url, timeout=30)
         soup = BeautifulSoup(response.text, "html.parser")
         edits = soup.find_all("li", attrs={"data-mw-revid": True})
 
@@ -51,9 +59,10 @@ def get_edit_history_urls(page_title):
             edit_url = (
                 "https://en.wikipedia.org" + edit.find("a", class_="mw-changeslist-date")["href"]
             )
+            oldid = parse_qs(urlparse(edit_url).query).get("oldid", [None])[0]
 
             if edit_date.date() not in last_seen_dates:
-                edit_history.append((edit_date, edit_url))
+                edit_history.append((edit_date, oldid))
                 last_seen_dates.add(edit_date.date())
 
             if edit_date.date() <= wikipedia.WIKIPEDIA_QUESTION_BANK_DATA_STORAGE_START_DATE:
@@ -67,13 +76,16 @@ def get_edit_history_urls(page_title):
     return edit_history
 
 
-def download_wikipedia_table(url, table_index):
+def download_wikipedia_table(page_title, revid, table_index):
     """Download tables from url.
 
     If `table_index` is an int, download just that table from the url.
     Otherwise, if `table_index` is a list, download those tables and concatenate.
     """
-    tables = pd.read_html(url)
+    url = f"https://en.wikipedia.org/api/rest_v1/page/html/{page_title}/{revid}"
+    response = SESSION.get(url, timeout=30)
+    response.raise_for_status()
+    tables = pd.read_html(BytesIO(response.content))
     return (
         tables[table_index]
         if isinstance(table_index, int)
@@ -88,40 +100,51 @@ def download_tables(page):
     table_index = page.get("table_index", 0)
     columns = list(page.get("fields").values())
 
-    edit_history = get_edit_history_urls(page_title=page_title)
+    edit_history = get_edit_history(page_title=page_title)
     edit_history.sort(reverse=True, key=lambda x: x[0])
 
-    df = None
-    for edit_date, url in tqdm(edit_history, f"Downloading edit histories for {page_title}"):
+    value_col = page["fields"]["value"]
+    value_col_dtype = page["resolution_file_value_column_dtype"]
+
+    df_list = []
+    for edit_date, revid in tqdm(edit_history, f"Downloading edit histories for {page_title}"):
         try:
-            time.sleep(1)
-            dfw = download_wikipedia_table(url=url, table_index=table_index)
+            dfw = download_wikipedia_table(
+                page_title=page_title, revid=revid, table_index=table_index
+            )
             if n_rows_to_keep is not None:
                 dfw = dfw.iloc[:n_rows_to_keep]
             dfw = dfw[columns]
             dfw["date"] = edit_date.date().isoformat()
+            if value_col_dtype in (int, float):
+                dfw[value_col] = pd.to_numeric(dfw[value_col], errors="coerce")
+            elif value_col_dtype is str:
+                pass
+            else:
+                raise ValueError(f"`{value_col_dtype}` dytpe not yet supported.")
             dfw = dfw.dropna()
-            df = dfw if df is None else pd.concat([df, dfw], ignore_index=True)
+            dfw[value_col] = dfw[value_col].astype(value_col_dtype)
+            df_list.append(dfw.dropna())
         except Exception as e:
             logger.error(e)
+    df = pd.concat(df_list, ignore_index=True) if df_list else None
     return df
 
 
-def download_and_store_wikipedia_tables():
+def download_and_store_wikipedia_tables(page):
     """Fetch and upload data for each page object in wikipedia.PAGES."""
-    for page in wikipedia.PAGES:
-        question_id_root = page.get("id_root")
-        filename = wikipedia.get_fetch_filename(question_id_root)
-        local_filename = f"/tmp/{filename}"
-        logger.info(f"Downloading data for {question_id_root}.")
+    question_id_root = page.get("id_root")
+    filename = wikipedia.get_fetch_filename(question_id_root)
+    local_filename = f"/tmp/{filename}"
+    logger.info(f"Downloading data for {question_id_root}.")
 
-        df = download_tables(page=page)
-        df.to_json(local_filename, orient="records", lines=True, force_ascii=False)
-        gcp.storage.upload(
-            bucket_name=env.QUESTION_BANK_BUCKET,
-            local_filename=local_filename,
-            destination_folder=wikipedia.fetch_directory,
-        )
+    df = download_tables(page=page)
+    df.to_json(local_filename, orient="records", lines=True, force_ascii=False)
+    gcp.storage.upload(
+        bucket_name=env.QUESTION_BANK_BUCKET,
+        local_filename=local_filename,
+        destination_folder=wikipedia.fetch_directory,
+    )
 
 
 @decorator.log_runtime
@@ -130,7 +153,14 @@ def driver(_):
     # Get the latest Wikipedia data
     logger.info("Downloading Wikipedia data.")
 
-    download_and_store_wikipedia_tables()
+    with ThreadPoolExecutor(max_workers=env.NUM_CPUS) as ex:
+        list(
+            tqdm(
+                ex.map(download_and_store_wikipedia_tables, wikipedia.PAGES),
+                total=len(wikipedia.PAGES),
+                desc="Downloading pages",
+            )
+        )
 
     logger.info("Done.")
 

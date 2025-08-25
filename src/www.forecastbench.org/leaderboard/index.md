@@ -20,6 +20,33 @@ after_footer_scripts:
 
 
 
-<div class="page-title">{{ page.title }}</div>
+<div class="page-title">{{ page.title }}<sup><a href="#notes" style="text-decoration:none;">‡</a></sup></div>
 <div id="leaderboard-table-full"></div>
 
+<section id="notes" class="site-feature-card-row-1">
+  <h1 class="site-feature-row__title">‡Notes</h1>
+  <div class="site-feature-row__content-small">
+    <ul>
+    <li>Performance on Dataset and Market questions is scored using a <a href="https://github.com/forecastingresearch/forecastbench/wiki/Changelog#scoring-method-two-way-fixed-effects">two-way fixed effects model <i class="fa-solid fa-arrow-up-right-from-square"></i></a> to account for differences in question difficulty across question sets. The Overall score is then the equal-weighted average of the Dataset and Market scores.</li>
+    <li>To ensure leaderboard stability, models are included on the leaderboard <a href="https://github.com/forecastingresearch/forecastbench/wiki/Changelog#100-day-delay-before-a-forecaster-is-included-on-the-leaderboard">100 days after forecast submission <i class="fa-solid fa-arrow-up-right-from-square"></i></a>.</li>
+    <li>Human comparison groups are highlighted in red.</li>
+    <li>The zero shot and scratchpad prompts used for the models run by ForecastBench can be found on <a href="https://github.com/forecastingresearch/forecastbench/blob/main/src/helpers/llm_prompts.py">GitHub <i class="fa-solid fa-arrow-up-right-from-square"></i></a>.</li>
+    <li>The ForecastBench baseline forecasters are described on the <a href="https://github.com/forecastingresearch/forecastbench/wiki/Changelog#baseline-forecasters">Changelog <i class="fa-solid fa-arrow-up-right-from-square"></i></a>.</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+// Allow scroll to #notes if someone provides the URL as a link.
+window.addEventListener("load", function() {
+  if (window.location.hash) {
+    const el = document.querySelector(window.location.hash);
+    if (el) {
+      // delay to let DataTables finish layout
+      setTimeout(() => {
+        el.scrollIntoView({behavior: "smooth", block: "start"});
+      }, 500);
+    }
+  }
+});
+</script>

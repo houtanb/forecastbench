@@ -5,6 +5,6 @@ main:
   - title: "Datasets"
     url: "/datasets/"
     icon: "fa-solid fa-table"
-  - title: "Paper"
-    url: "/paper/"
+  - title: "Docs"
+    url: "/docs/"
     icon: "fa-regular fa-file"

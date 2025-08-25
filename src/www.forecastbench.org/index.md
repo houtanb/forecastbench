@@ -28,8 +28,8 @@ excerpt: "A dynamic, continuously-updated benchmark designed to measure the accu
 
 <div style="display:flex;">
   <div style="flex:2; padding-right:1rem;">
-      <h1>Benchmark your model</h1>
-    <p>Would you like to benchmark your model's forecasting capabilities on ForecastBench?</p>
+      <h1>Benchmark your model!</h1>
+    <p>Would you like to have your model's forecasting capabilities evaluated on ForecastBench?</p>
         <p>Follow the <a href="https://github.com/forecastingresearch/forecastbench/wiki/How-to-submit-to-ForecastBench">instructions on how to submit<i class="fa-solid fa-arrow-up-right-from-square"></i></a> to find out how.</p>
   </div>
   <div style="flex:3;">

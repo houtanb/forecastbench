@@ -6,8 +6,8 @@ permalink: /datasets/
 
 <div class="page-title">{{ page.title }}</div>
 
-<section class="paper-feature-card">
-  <div class="paper-feature-row__content">
+<section class="site-feature-card">
+  <div class="site-feature-row__content">
   <p>
   We publish as much data as we can in our <a href="https://github.com/forecastingresearch/forecastbench-datasets">datasets repository on GitHub<i class="fa-solid fa-arrow-up-right-from-square"></i></a>. Unfortunately, because of license restrictions, we're not able to publish information from the datasets from which we generate questions nor are we able to publish the market information pulled from forecasting websites.
   <br><br>

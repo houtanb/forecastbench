@@ -25,7 +25,76 @@
   .wrap { max-width: 1100px; margin: 24px auto 40px auto; padding: 0 16px; }
   h1 { font-size: 20px; margin: 0 0 6px 0; font-weight: 650; }
   .sub { color: var(--sota-text); font-size: 13px; margin-bottom: 12px; }
-  select, option { color: var(--sota-text); }
+  /* Consistent dropdown styling for both native select and custom dropdown */
+  select, .benchmark-button {
+    color: var(--sota-text);
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.2;
+    vertical-align: middle;
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+  
+  select:focus, .benchmark-button:hover {
+    outline: none;
+    border-color: #93a3b5;
+  }
+  
+  option { color: var(--sota-text); }
+
+  /* Custom benchmark dropdown styles */
+  .benchmark-dropdown {
+    position: relative;
+    display: inline-block;
+  }
+  .benchmark-button {
+    /* Additional styling specific to custom dropdown */
+    cursor: pointer;
+    min-width: 200px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .benchmark-dropdown-content {
+    display: none;
+    position: absolute;
+    background: var(--sota-bg);
+    min-width: 200px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    z-index: 1000;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    margin-top: 2px;
+  }
+  .benchmark-dropdown.open .benchmark-dropdown-content {
+    display: block;
+  }
+  .benchmark-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--sota-text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .benchmark-option:hover {
+    background: var(--sota-grid);
+  }
+  .benchmark-option input[type="checkbox"] {
+    margin: 0;
+  }
+  .dropdown-arrow {
+    font-size: 10px;
+    color: #666;
+  }
 
   /* SVG styles */
   .grid line { stroke: var(--sota-grid); stroke-width: 1; }
@@ -63,13 +132,58 @@
 <div class="wrap">
   <h1>ForecastBench: Forecasting Performance of Large Language Models</h1>
   <div class="sub"></div>
-  <div style="display:flex; align-items:center; gap:8px; margin: 8px 0 12px 0;">
-    <div class="sub" style="margin:0;">Question Source</div>
-    <select id="typeSelect" style="padding:4px 8px; font-size:13px;">
-      <option value="overall" selected>All</option>
-      <option value="dataset">Dataset</option>
-      <option value="market">Market</option>
-    </select>
+  <div style="display:flex; align-items:center; gap:16px; margin: 8px 0 12px 0; flex-wrap: wrap;">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div class="sub" style="margin:0;">Question Source</div>
+      <select id="typeSelect">
+        <option value="overall" selected>All</option>
+        <option value="dataset">Dataset</option>
+        <option value="market">Market</option>
+      </select>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div class="sub" style="margin:0;">Benchmarks</div>
+      <div class="benchmark-dropdown" id="benchmarkDropdown">
+        <div class="benchmark-button" id="benchmarkButton">
+          <span id="benchmarkLabel">Public, Superforecaster, Always 0.5</span>
+          <span class="dropdown-arrow">▼</span>
+        </div>
+        <div class="benchmark-dropdown-content">
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_public" value="public" checked>
+            <label for="bench_public">Public</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_superforecaster" value="superforecaster" checked>
+            <label for="bench_superforecaster">Superforecaster</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_always_0.5" value="always_0.5" checked>
+            <label for="bench_always_0.5">Always 0.5</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_imputed" value="imputed">
+            <label for="bench_imputed">Imputed Forecaster</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_naive" value="naive">
+            <label for="bench_naive">Naive Forecaster</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_always_0" value="always_0">
+            <label for="bench_always_0">Always 0</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_always_1" value="always_1">
+            <label for="bench_always_1">Always 1</label>
+          </div>
+          <div class="benchmark-option">
+            <input type="checkbox" id="bench_random_uniform" value="random_uniform">
+            <label for="bench_random_uniform">Random Uniform</label>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="chart"></div>
   <div id="drop" class="drop">Couldn’t auto-load <strong>sota_graph.csv</strong> (some browsers block local file reads).<br>
@@ -203,21 +317,35 @@
       .attr('text-anchor','middle')
       .text('Difficulty-Adjusted Brier Score (Lower = Better)');
 
-    // reference lines
+    // reference lines based on selected benchmarks
     if (SHOW_REFS){
-      const refs = [
-        {y:0.25,  label:'Always 0.5'}
-      ];
+      const selectedBenchmarks = getSelectedBenchmarks();
+      const refs = [];
       
-      // Only add baseline reference lines if they exist in the data
-      if (baselines.public !== undefined) {
-        refs.push({y:baselines.public, label:'Public'});
+      // Add reference lines for selected benchmarks
+      if (selectedBenchmarks.includes('always_0.5')) {
+        refs.push({y:0.25, label:'Always 0.5', key:'always_0.5'});
       }
-      if (baselines.superforecaster !== undefined) {
-        refs.push({y:baselines.superforecaster, label:'Superforecaster'});
+      if (selectedBenchmarks.includes('public') && baselines.public !== undefined) {
+        refs.push({y:baselines.public, label:'Public', key:'public'});
       }
-      if (baselines.imputed !== undefined) {
-        refs.push({y:baselines.imputed, label:'Market'});
+      if (selectedBenchmarks.includes('superforecaster') && baselines.superforecaster !== undefined) {
+        refs.push({y:baselines.superforecaster, label:'Superforecaster', key:'superforecaster'});
+      }
+      if (selectedBenchmarks.includes('imputed') && baselines.imputed !== undefined) {
+        refs.push({y:baselines.imputed, label:'Imputed Forecaster', key:'imputed'});
+      }
+      if (selectedBenchmarks.includes('naive') && baselines.naive !== undefined) {
+        refs.push({y:baselines.naive, label:'Naive Forecaster', key:'naive'});
+      }
+      if (selectedBenchmarks.includes('always_0') && baselines.always_0 !== undefined) {
+        refs.push({y:baselines.always_0, label:'Always 0', key:'always_0'});
+      }
+      if (selectedBenchmarks.includes('always_1') && baselines.always_1 !== undefined) {
+        refs.push({y:baselines.always_1, label:'Always 1', key:'always_1'});
+      }
+      if (selectedBenchmarks.includes('random_uniform') && baselines.random_uniform !== undefined) {
+        refs.push({y:baselines.random_uniform, label:'Random Uniform', key:'random_uniform'});
       }
       for (const r of refs){
         g.append('line').attr('class','refline')
@@ -231,7 +359,7 @@
          .attr('y', y(r.y) - 8).attr('height', 16)
          .attr('fill', 'transparent')
          .style('cursor', 'pointer')
-         .on('mouseenter', (ev) => tipOn(ev, referenceTooltipHTML(r.label, r.y, baselines, currentType)))
+         .on('mouseenter', (ev) => tipOn(ev, referenceTooltipHTML(r.label, r.y, baselines, currentType, r.key)))
          .on('mouseleave', tipOff);
       }
     }
@@ -433,45 +561,29 @@
       `;
     }
     
-    function referenceTooltipHTML(label, score, baselines, baselineType) {
+    function referenceTooltipHTML(label, score, baselines, baselineType, key) {
       let title, hasCI = false, lb, ub;
       let baselineRow = null;
+      let modelName = null;
       
-      if (label === 'Always 0.5') {
-        title = 'Always Predict 0.5';
-      } else if (label === 'Public') {
-        title = 'Public Median Forecast';
-        baselineRow = originalRows.find(d => d.model === 'Public median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        // Get CI from original CSV data, but only show for 'overall'
-        if (baselineRow && baselineType === 'overall') {
-          const lbRaw = baselineRow.conf_int_lb;
-          const ubRaw = baselineRow.conf_int_ub;
-          const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
-          const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
-          if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
-            lb = lbNum;
-            ub = ubNum;
-            hasCI = true;
-          }
-        }
-      } else if (label === 'Superforecaster') {
-        title = 'Superforecaster Median Forecast';
-        baselineRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && (d.type||'').trim().toLowerCase() === baselineType);
-        // Get CI from original CSV data, but only show for 'overall'
-        if (baselineRow && baselineType === 'overall') {
-          const lbRaw = baselineRow.conf_int_lb;
-          const ubRaw = baselineRow.conf_int_ub;
-          const lbNum = (lbRaw === undefined || lbRaw === null || String(lbRaw).trim() === '') ? NaN : +lbRaw;
-          const ubNum = (ubRaw === undefined || ubRaw === null || String(ubRaw).trim() === '') ? NaN : +ubRaw;
-          if (Number.isFinite(lbNum) && Number.isFinite(ubNum)) {
-            lb = lbNum;
-            ub = ubNum;
-            hasCI = true;
-          }
-        }
-      } else if (label === 'Market') {
-        title = 'Market Forecast';
-        baselineRow = originalRows.find(d => d.model === 'Imputed Forecaster' && (d.type||'').trim().toLowerCase() === baselineType);
+      // Map benchmark keys to model names and titles
+      const benchmarkConfig = {
+        'always_0.5': { title: 'Always Predict 0.5', model: null },
+        'public': { title: 'Public Median Forecast', model: 'Public median forecast' },
+        'superforecaster': { title: 'Superforecaster Median Forecast', model: 'Superforecaster median forecast' },
+        'imputed': { title: 'Imputed Forecaster', model: 'Imputed Forecaster' },
+        'naive': { title: 'Naive Forecaster', model: 'Naive Forecaster' },
+        'always_0': { title: 'Always Predict 0', model: 'Always 0' },
+        'always_1': { title: 'Always Predict 1', model: 'Always 1' },
+        'random_uniform': { title: 'Random Uniform Prediction', model: 'Random Uniform' }
+      };
+      
+      const config = benchmarkConfig[key] || { title: label, model: null };
+      title = config.title;
+      modelName = config.model;
+      
+      if (modelName) {
+        baselineRow = originalRows.find(d => d.model === modelName && (d.type||'').trim().toLowerCase() === baselineType);
         // Get CI from original CSV data, but only show for 'overall'
         if (baselineRow && baselineType === 'overall') {
           const lbRaw = baselineRow.conf_int_lb;
@@ -528,6 +640,41 @@
     }
   }
 
+  // --- Helper function to get selected benchmarks ---
+  function getSelectedBenchmarks() {
+    const checkboxes = document.querySelectorAll('.benchmark-dropdown input[type="checkbox"]:checked');
+    if (checkboxes.length === 0) return ['public', 'superforecaster', 'always_0.5']; // default fallback
+    return Array.from(checkboxes).map(checkbox => checkbox.value);
+  }
+  
+  // --- Update benchmark button label ---
+  function updateBenchmarkLabel() {
+    const selected = getSelectedBenchmarks();
+    const label = document.getElementById('benchmarkLabel');
+    if (!label) return;
+    
+    const labelMap = {
+      'public': 'Public',
+      'superforecaster': 'Superforecaster', 
+      'always_0.5': 'Always 0.5',
+      'imputed': 'Imputed Forecaster',
+      'naive': 'Naive Forecaster',
+      'always_0': 'Always 0',
+      'always_1': 'Always 1',
+      'random_uniform': 'Random Uniform'
+    };
+    
+    if (selected.length === 0) {
+      label.textContent = 'Select benchmarks...';
+    } else if (selected.length === 1) {
+      label.textContent = labelMap[selected[0]] || selected[0];
+    } else if (selected.length === 2) {
+      label.textContent = `${labelMap[selected[0]]}, ${labelMap[selected[1]]}`;
+    } else {
+      label.textContent = `${labelMap[selected[0]]}, ${labelMap[selected[1]]} + ${selected.length - 2} more`;
+    }
+  }
+  
   // --- Load CSV (auto) with drag-drop fallback for file:// ---
   let originalRows = []; // Store original rows for tooltip access
   
@@ -539,6 +686,10 @@
     const superforecasterRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && isType(d));
     const publicRow = originalRows.find(d => d.model === 'Public median forecast' && isType(d));
     const imputedForecastRow = originalRows.find(d => d.model === 'Imputed Forecaster' && isType(d));
+    const naiveForecastRow = originalRows.find(d => d.model === 'Naive Forecaster' && isType(d));
+    const always0Row = originalRows.find(d => d.model === 'Always 0' && isType(d));
+    const always1Row = originalRows.find(d => d.model === 'Always 1' && isType(d));
+    const randomUniformRow = originalRows.find(d => d.model === 'Random Uniform' && isType(d));
     
     // Data rows of the selected type with dates
     const filtered = originalRows.filter(d => isType(d) && d.release_date && d.release_date.trim() !== '');
@@ -555,7 +706,11 @@
     const baselines = {};
     if (superforecasterRow) baselines.superforecaster = +superforecasterRow.diff_adj_brier;
     if (publicRow) baselines.public = +publicRow.diff_adj_brier;
-    if (imputedForecastRow && typeNorm === 'market') baselines.imputed = +imputedForecastRow.diff_adj_brier;
+    if (imputedForecastRow) baselines.imputed = +imputedForecastRow.diff_adj_brier;
+    if (naiveForecastRow) baselines.naive = +naiveForecastRow.diff_adj_brier;
+    if (always0Row) baselines.always_0 = +always0Row.diff_adj_brier;
+    if (always1Row) baselines.always_1 = +always1Row.diff_adj_brier;
+    if (randomUniformRow) baselines.random_uniform = +randomUniformRow.diff_adj_brier;
     
     markSOTA(parsed);
     const showErrorBars = typeNorm === 'overall';
@@ -592,6 +747,7 @@
         const rows = d3.csvParse(text);
         dropEl.classList.remove('show');
         parseRows(rows);
+        updateBenchmarkLabel(); // Update label after data loads
       };
       reader.readAsText(f);
     });
@@ -599,14 +755,50 @@
 
   // Bind control change after DOM ready
   document.addEventListener('DOMContentLoaded', () => {
-    const sel = document.getElementById('typeSelect');
-    if (sel) {
-      sel.addEventListener('change', () => {
+    const typeSelect = document.getElementById('typeSelect');
+    const benchmarkDropdown = document.getElementById('benchmarkDropdown');
+    const benchmarkButton = document.getElementById('benchmarkButton');
+    
+    // Type select change handler
+    if (typeSelect) {
+      typeSelect.addEventListener('change', () => {
         if (originalRows && originalRows.length) {
-          renderForType(sel.value);
+          renderForType(typeSelect.value);
         }
       });
     }
+    
+    // Benchmark dropdown toggle
+    if (benchmarkButton && benchmarkDropdown) {
+      benchmarkButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        benchmarkDropdown.classList.toggle('open');
+      });
+      
+      // Close dropdown when clicking outside
+      document.addEventListener('click', () => {
+        benchmarkDropdown.classList.remove('open');
+      });
+      
+      // Prevent dropdown from closing when clicking inside
+      benchmarkDropdown.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+    
+    // Benchmark checkbox change handlers
+    const benchmarkCheckboxes = document.querySelectorAll('.benchmark-dropdown input[type="checkbox"]');
+    benchmarkCheckboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        updateBenchmarkLabel();
+        if (originalRows && originalRows.length) {
+          renderForType(typeSelect ? typeSelect.value : 'overall');
+        }
+      });
+    });
+    
+    // Initialize label
+    updateBenchmarkLabel();
   });
   
   tryFetch();

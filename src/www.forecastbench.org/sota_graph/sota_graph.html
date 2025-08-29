@@ -119,6 +119,13 @@
     box-shadow: 0 8px 20px rgba(0,0,0,.25);
   }
 
+  .selection-rect {
+    fill: rgba(66, 139, 202, 0.15);
+    stroke: rgba(66, 139, 202, 0.8);
+    stroke-width: 1;
+    stroke-dasharray: 5,5;
+  }
+
   /* Drag & drop fallback UI when local file fetch is blocked */
   .drop {
     display:none; margin-top: 10px; border: 1.5px dashed #cbd5e1; border-radius: 10px;
@@ -261,6 +268,15 @@
     }
   }
 
+  // --- Global variables for zoom and selection ---
+  let currentXDomain = null;
+  let currentYDomain = null;
+  let isSelecting = false;
+  let selectionStart = null;
+  let selectionRect = null;
+  let isShiftPressed = false;
+  let updateOverlayInteraction = null;
+
   // --- Main draw ---
   function draw(data, baselines = {}, showErrorBars = false, currentType = 'overall'){
     const container = document.getElementById('chart');
@@ -285,12 +301,16 @@
     const extendedMinDate = new Date(minDate.getFullYear(), minDate.getMonth() - 2, minDate.getDate());
     const extendedMaxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, maxDate.getDate());
     
+    // Use current zoom domains if they exist, otherwise use default
+    const xDomain = currentXDomain || [extendedMinDate, extendedMaxDate];
+    const yDomain = currentYDomain || Y_DOMAIN;
+    
     const x = d3.scaleTime()
-      .domain([extendedMinDate, extendedMaxDate])
+      .domain(xDomain)
       .range([0, width]);
 
     const y = d3.scaleLinear()
-      .domain(Y_DOMAIN).nice()
+      .domain(yDomain).nice()
       .range([height, 0]);
 
     // grid
@@ -365,11 +385,15 @@
     }
 
     function tipOn(event, html){
+      if (isSelecting) return;
       tip.html(html).style('opacity',1);
       const [mx, my] = d3.pointer(event, document.body);
       tip.style('left', (mx+12)+'px').style('top', (my+12)+'px');
     }
-    function tipOff(){ tip.style('opacity',0); }
+    function tipOff(){ 
+      if (isSelecting) return;
+      tip.style('opacity',0); 
+    }
 
     // points not SOTA
     const rest = data.filter(d => !d.is_sota_at_release);
@@ -413,20 +437,26 @@
     if (regression && sota.length >= 2) {
       const firstSotaDate = regression.firstDate;
       const lastDate = maxDate;
+      
+      // Use current x domain for trend line boundaries
+      const [currentXMin, currentXMax] = x.domain();
+      const trendStartDate = new Date(Math.max(firstSotaDate.getTime(), currentXMin.getTime()));
+      const trendEndDate = new Date(Math.min(lastDate.getTime(), currentXMax.getTime()));
+      
       // Compute y along the line using months since first SOTA
       function yOnTrend(date){
         const months = (date - firstSotaDate) / (1000 * 60 * 60 * 24 * 30);
         return regression.a + regression.b * months;
       }
-      const yStart = yOnTrend(firstSotaDate);
-      const yEnd = yOnTrend(lastDate);
+      const yStart = yOnTrend(trendStartDate);
+      const yEnd = yOnTrend(trendEndDate);
       
       // Visible trend line
       const trendLine = g.append('line')
         .attr('class', 'trend-line')
-        .attr('x1', x(firstSotaDate))
+        .attr('x1', x(trendStartDate))
         .attr('y1', y(yStart))
-        .attr('x2', x(lastDate))
+        .attr('x2', x(trendEndDate))
         .attr('y2', y(yEnd))
         .style('stroke', 'var(--sota-sota)')
         .style('stroke-width', '2')
@@ -435,9 +465,9 @@
 
       // Add wider invisible hit area for tooltip interactions
       const trendHit = g.append('line')
-        .attr('x1', x(firstSotaDate))
+        .attr('x1', x(trendStartDate))
         .attr('y1', y(yStart))
-        .attr('x2', x(lastDate))
+        .attr('x2', x(trendEndDate))
         .attr('y2', y(yEnd))
         .attr('stroke', 'transparent')
         .attr('stroke-width', 14)
@@ -624,6 +654,104 @@
       return html;
     }
 
+    // --- Rectangle selection functionality ---
+    // Add an overlay that only captures events when SHIFT is pressed
+    const selectionOverlay = g.append('rect')
+      .attr('width', width)
+      .attr('height', height)
+      .attr('fill', 'transparent')
+      .style('cursor', 'default')
+      .style('pointer-events', 'none') // Initially let events pass through
+      .on('mousedown', function(event) {
+        if (event.button !== 0 || !isShiftPressed) return; // Only left mouse button + SHIFT
+        event.preventDefault();
+        isSelecting = true;
+        tipOff(); // Hide any existing tooltip
+        
+        const [mouseX, mouseY] = d3.pointer(event, this);
+        selectionStart = {x: mouseX, y: mouseY};
+        
+        if (selectionRect) {
+          selectionRect.remove();
+        }
+        
+        selectionRect = g.append('rect')
+          .attr('class', 'selection-rect')
+          .attr('x', mouseX)
+          .attr('y', mouseY)
+          .attr('width', 0)
+          .attr('height', 0);
+      });
+    
+    // Function to update overlay behavior based on SHIFT state
+    updateOverlayInteraction = function() {
+      selectionOverlay
+        .style('pointer-events', isShiftPressed ? 'all' : 'none')
+        .style('cursor', isShiftPressed ? 'crosshair' : 'default');
+    };
+    
+    updateOverlayInteraction();
+
+    // Add mousemove and mouseup to the SVG to handle events outside the selection area
+    svg.on('mousemove', function(event) {
+      if (!isSelecting || !selectionStart || !selectionRect) return;
+      
+      const [mouseX, mouseY] = d3.pointer(event, g.node());
+      const x1 = Math.min(selectionStart.x, mouseX);
+      const y1 = Math.min(selectionStart.y, mouseY);
+      const x2 = Math.max(selectionStart.x, mouseX);
+      const y2 = Math.max(selectionStart.y, mouseY);
+      
+      // Constrain to chart bounds
+      const constrainedX1 = Math.max(0, Math.min(width, x1));
+      const constrainedY1 = Math.max(0, Math.min(height, y1));
+      const constrainedX2 = Math.max(0, Math.min(width, x2));
+      const constrainedY2 = Math.max(0, Math.min(height, y2));
+      
+      selectionRect
+        .attr('x', constrainedX1)
+        .attr('y', constrainedY1)
+        .attr('width', constrainedX2 - constrainedX1)
+        .attr('height', constrainedY2 - constrainedY1);
+    })
+    .on('mouseup', function(event) {
+      if (!isSelecting || !selectionStart || !selectionRect) return;
+      
+      const [mouseX, mouseY] = d3.pointer(event, g.node());
+      const x1 = Math.min(selectionStart.x, mouseX);
+      const y1 = Math.min(selectionStart.y, mouseY);
+      const x2 = Math.max(selectionStart.x, mouseX);
+      const y2 = Math.max(selectionStart.y, mouseY);
+      
+      // Constrain to chart bounds
+      const constrainedX1 = Math.max(0, Math.min(width, x1));
+      const constrainedY1 = Math.max(0, Math.min(height, y1));
+      const constrainedX2 = Math.max(0, Math.min(width, x2));
+      const constrainedY2 = Math.max(0, Math.min(height, y2));
+      
+      // Only zoom if selection has meaningful size (at least 10px in both dimensions)
+      if (Math.abs(constrainedX2 - constrainedX1) >= 10 && Math.abs(constrainedY2 - constrainedY1) >= 10) {
+        // Convert pixel coordinates back to data coordinates
+        const newXDomain = [x.invert(constrainedX1), x.invert(constrainedX2)];
+        const newYDomain = [y.invert(constrainedY2), y.invert(constrainedY1)]; // y is flipped
+        
+        // Update current domains
+        currentXDomain = newXDomain;
+        currentYDomain = newYDomain;
+        
+        // Redraw with new zoom
+        draw(data, baselines, showErrorBars, currentType);
+      }
+      
+      // Clean up selection state
+      if (selectionRect) {
+        selectionRect.remove();
+        selectionRect = null;
+      }
+      isSelecting = false;
+      selectionStart = null;
+    });
+
     // Tooltip for the trend line
     function trendTooltipHTML(reg) {
       const a = reg.a;
@@ -753,6 +881,16 @@
     });
   }
 
+  // --- Reset zoom function ---
+  function resetZoom() {
+    currentXDomain = null;
+    currentYDomain = null;
+    if (originalRows && originalRows.length) {
+      const typeSelect = document.getElementById('typeSelect');
+      renderForType(typeSelect ? typeSelect.value : 'overall');
+    }
+  }
+
   // Bind control change after DOM ready
   document.addEventListener('DOMContentLoaded', () => {
     const typeSelect = document.getElementById('typeSelect');
@@ -799,6 +937,26 @@
     
     // Initialize label
     updateBenchmarkLabel();
+    
+    // Add key handlers for zoom reset and SHIFT detection
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        resetZoom();
+      }
+      if (event.key === 'Shift') {
+        isShiftPressed = true;
+        // Update overlay interaction
+        if (updateOverlayInteraction) updateOverlayInteraction();
+      }
+    });
+    
+    document.addEventListener('keyup', (event) => {
+      if (event.key === 'Shift') {
+        isShiftPressed = false;
+        // Update overlay interaction
+        if (updateOverlayInteraction) updateOverlayInteraction();
+      }
+    });
   });
   
   tryFetch();

@@ -191,6 +191,10 @@
         </div>
       </div>
     </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="includeFreeze" checked style="margin:0;">
+      <label for="includeFreeze" class="sub" style="margin:0; cursor:pointer;">Include "freeze-value" prompts</label>
+    </div>
   </div>
   <div id="chart"></div>
   <div id="drop" class="drop">Couldn’t auto-load <strong>sota_graph.csv</strong> (some browsers block local file reads).<br>
@@ -259,7 +263,12 @@
     let best = Infinity, tol = 1e-12;
     for (const [, sameDayRows] of Array.from(byDate).sort((a,b)=> d3.ascending(a[0], b[0]))){
       sameDayRows.forEach(r => { r.is_sota_at_release = false; });
-      sameDayRows.sort((a,b)=> d3.ascending(a.overall_score, b.overall_score));
+      sameDayRows.sort((a,b)=> {
+        const scoreComp = d3.ascending(a.overall_score, b.overall_score);
+        if (scoreComp !== 0) return scoreComp;
+        // If scores are equal, sort by model name for consistency
+        return d3.ascending(a.model, b.model);
+      });
       const bestOfDay = sameDayRows[0]?.overall_score;
       if (bestOfDay !== undefined && bestOfDay < best - tol){
         sameDayRows[0].is_sota_at_release = true; // only one per day, the best
@@ -775,6 +784,21 @@
     return Array.from(checkboxes).map(checkbox => checkbox.value);
   }
   
+  // --- Helper function to check if freeze models should be included ---
+  function shouldIncludeFreeze() {
+    const checkbox = document.getElementById('includeFreeze');
+    return checkbox ? checkbox.checked : true; // default to true if checkbox not found
+  }
+  
+  // --- Helper function to filter freeze models ---
+  function filterFreezeModels(rows) {
+    if (shouldIncludeFreeze()) {
+      return rows; // include all models when checked
+    }
+    // Filter out models with "freeze" in their name (case-insensitive)
+    return rows.filter(row => !row.model.toLowerCase().includes('freeze'));
+  }
+  
   // --- Update benchmark button label ---
   function updateBenchmarkLabel() {
     const selected = getSelectedBenchmarks();
@@ -810,17 +834,20 @@
     const typeNorm = (selectedType || 'overall').trim().toLowerCase();
     const isType = d => (d.type || '').trim().toLowerCase() === typeNorm;
     
-    // Baselines of the selected type
-    const superforecasterRow = originalRows.find(d => d.model === 'Superforecaster median forecast' && isType(d));
-    const publicRow = originalRows.find(d => d.model === 'Public median forecast' && isType(d));
-    const imputedForecastRow = originalRows.find(d => d.model === 'Imputed Forecaster' && isType(d));
-    const naiveForecastRow = originalRows.find(d => d.model === 'Naive Forecaster' && isType(d));
-    const always0Row = originalRows.find(d => d.model === 'Always 0' && isType(d));
-    const always1Row = originalRows.find(d => d.model === 'Always 1' && isType(d));
-    const randomUniformRow = originalRows.find(d => d.model === 'Random Uniform' && isType(d));
+    // Apply freeze filter to all data
+    const filteredRows = filterFreezeModels(originalRows);
+    
+    // Baselines of the selected type (always include baselines, they don't have freeze in name)
+    const superforecasterRow = filteredRows.find(d => d.model === 'Superforecaster median forecast' && isType(d));
+    const publicRow = filteredRows.find(d => d.model === 'Public median forecast' && isType(d));
+    const imputedForecastRow = filteredRows.find(d => d.model === 'Imputed Forecaster' && isType(d));
+    const naiveForecastRow = filteredRows.find(d => d.model === 'Naive Forecaster' && isType(d));
+    const always0Row = filteredRows.find(d => d.model === 'Always 0' && isType(d));
+    const always1Row = filteredRows.find(d => d.model === 'Always 1' && isType(d));
+    const randomUniformRow = filteredRows.find(d => d.model === 'Random Uniform' && isType(d));
     
     // Data rows of the selected type with dates
-    const filtered = originalRows.filter(d => isType(d) && d.release_date && d.release_date.trim() !== '');
+    const filtered = filteredRows.filter(d => isType(d) && d.release_date && d.release_date.trim() !== '');
     const toNumOrNaN = v => (v === undefined || v === null || String(v).trim() === '') ? NaN : +v;
     const parsed = filtered.map(d => ({
       model: d.model,
@@ -934,6 +961,16 @@
         }
       });
     });
+    
+    // Freeze models checkbox change handler
+    const freezeCheckbox = document.getElementById('includeFreeze');
+    if (freezeCheckbox) {
+      freezeCheckbox.addEventListener('change', () => {
+        if (originalRows && originalRows.length) {
+          renderForType(typeSelect ? typeSelect.value : 'overall');
+        }
+      });
+    }
     
     // Initialize label
     updateBenchmarkLabel();

@@ -63,13 +63,14 @@ HUMAN_SUPERFORECASTER = {
     "model": "Superforecaster median forecast",
     "model_organization": constants.BENCHMARK_NAME,
 }
-HUMAN_GENERAL_PUBLIC = {
+HUMAN_PUBLIC = {
     "organization": constants.BENCHMARK_NAME,
     "model": "Public median forecast",
     "model_organization": constants.BENCHMARK_NAME,
 }
 
-HUMAN_MODELS_TO_HIGHLIGHT = [HUMAN_SUPERFORECASTER["model"], HUMAN_GENERAL_PUBLIC["model"]]
+HUMAN_MODELS = [HUMAN_SUPERFORECASTER, HUMAN_PUBLIC]
+HUMAN_MODELS_TO_HIGHLIGHT = [m["model"] for m in HUMAN_MODELS]
 
 LEADERBOARD_DECIMAL_PLACES = 3
 
@@ -115,10 +116,16 @@ TOOLTIP_COLUMN_DESCRIPTIONS = {
         "Lower scores are better."
     ),
     "95% CI": "Bootstrapped 95% confidence interval for the Overall score.",
-    "P-value to best": (
-        "One-sided p-value comparing each model to the top-ranked model based on "
+    "P-value to supers": (
+        "One-sided p-value comparing each model to the superforecaster median based on "
         f"{N_REPLICATES:,} simulations, with<br>"
-        "H₀: This model performs at least as well as the top-ranked model.<br>"
+        "H₀: This model performs at least as well as the superforecaster median.<br>"
+        "H₁: The top-ranked model outperforms this model."
+    ),
+    "P-value to public": (
+        "One-sided p-value comparing each model to the public median based on "
+        f"{N_REPLICATES:,} simulations, with<br>"
+        "H₀: This model performs at least as well as the public median.<br>"
         "H₁: The top-ranked model outperforms this model."
     ),
     "Pct times № 1": (
@@ -485,7 +492,8 @@ def write_leaderboard_html_file(
         <th>Overall (N)</th>
         <th><!-- N --></th>
         <th>95% CI</th>
-        <th>P-value to best</th>
+        <th>P-value to supers</th>
+        <th>P-value to public</th>
         <th>Pct times № 1</th>
         <th>Pct times top 5%</th>
         <th>x% oracle equiv</th>
@@ -529,9 +537,14 @@ def write_leaderboard_html_file(
                 Number(row['N']).toLocaleString()+')</span>':d; };
             col.orderSequence = ['asc','desc'];
           }
-          if (name==='P-value to best') {
-            col.title = 'P-value to best <i class="info circle icon" '
-                        + ' data-html="{{ col_desc["P-value to best"] }}"></i>';
+          if (name==='P-value to supers') {
+            col.title = 'P-value to supers <i class="info circle icon" '
+                        + ' data-html="{{ col_desc["P-value to supers"] }}"></i>';
+            col.orderable=false;
+          }
+          if (name==='P-value to public') {
+            col.title = 'P-value to public <i class="info circle icon" '
+                        + ' data-html="{{ col_desc["P-value to public"] }}"></i>';
             col.orderable=false;
           }
           if (name==='Pct times № 1') {
@@ -652,9 +665,9 @@ def write_leaderboard_js_file_full(
             const cols = ["Rank", "Team", "Model Organization", "Model Organization Logo", "Model",
                           "Dataset", "N dataset", "Dataset 95% CI",
                           "Market", "N market", "Market 95% CI",
-                          "Overall", "N", "95% CI", "P-value to best",
-                          "Pct times № 1", "Pct times top 5%", "x% oracle equiv",
-                          "Peer", "BSS"];
+                          "Overall", "N", "95% CI", "P-value to supers",
+                          "P-value to public", "Pct times top 5%",
+                          "x% oracle equiv", "Peer", "BSS"];
             const columns = cols.map(name => {
                 const col = { data: name, title: name };
                 if (name === "Rank") {
@@ -722,11 +735,10 @@ def write_leaderboard_js_file_full(
                   col.orderSequence = ["asc", "desc"];
                 }
 
-                if (name === "P-value to best" || name === "x% oracle equiv") col.orderable = false;
-
-                if (name === "Pct times № 1") {
-                  col.render = (d, t) => (t === "display" ? Math.round(d) + "%" : d);
-                  col.orderSequence = ["desc", "asc"];
+                if (name === "P-value to supers"
+                    || name === "P-value to public"
+                    || name === "x% oracle equiv") {
+                      col.orderable = false;
                 }
 
                 if (name === "Pct times top 5%") {
@@ -764,8 +776,8 @@ def write_leaderboard_js_file_full(
                    <th class="column-header-tooltip" data-tooltip="Overall (N)">Overall (N)</th>
                    <th><!-- N --></th>
                    <th class="column-header-tooltip" data-tooltip="95% CI">95% CI</th>
-                   <th class="column-header-tooltip" data-tooltip="P-value to best">P-value to best</th>
-                   <th class="column-header-tooltip" data-tooltip="Pct times № 1">Pct times № 1</th>
+                   <th class="column-header-tooltip" data-tooltip="P-value to supers">P-value to supers</th>
+                   <th class="column-header-tooltip" data-tooltip="P-value to public">P-value to public</th>
                    <th class="column-header-tooltip" data-tooltip="Pct times top 5%">Pct times top 5%</th>
                    <th class="column-header-tooltip" data-tooltip="x% oracle equiv">x% oracle equiv</th>
                    <th class="column-header-tooltip" data-tooltip="Peer">Peer</th>
@@ -809,8 +821,8 @@ def write_leaderboard_js_file_full(
           'Market 95% CI': `{{ col_desc["Market 95% CI"] }}`,
           'Overall (N)': `{{ col_desc["Overall"] }}`,
           '95% CI': `{{ col_desc["95% CI"] }}`,
-          'P-value to best': `{{ col_desc["P-value to best"] }}`,
-          'Pct times № 1': `{{ col_desc["Pct times № 1"] }}`,
+          'P-value to supers': `{{ col_desc["P-value to supers"] }}`,
+          'P-value to public': `{{ col_desc["P-value to public"] }}`,
           'Pct times top 5%': `{{ col_desc["Pct times top 5%"] }}`,
           'x% oracle equiv': `{{ col_desc["x% oracle equiv"] }}`,
           'Peer': `{{ col_desc["Peer"] }}`,
@@ -1059,15 +1071,28 @@ def write_leaderboard(
     df = format_ci(df, "overall")
 
     df = df.sort_values(by=f"{primary_scoring_func.__name__}_overall", ignore_index=True)
-    df["p_value_one_sided"] = df["p_value_one_sided"].apply(
-        lambda p: (
-            "<0.001" if p < 0.001 else "<0.01" if p < 0.01 else "<0.05" if p < 0.05 else f"{p:.2f}"
-        )
-    )
-    df["x_pct_oracle_equivalent"] = df["x_pct_oracle_equivalent"].map("{:.0%}".format)
 
-    # Set the p-value for the best to N/A
-    df.loc[0, "p_value_one_sided"] = "—"
+    p_value_cols = {}
+    for comparison in HUMAN_MODELS:
+        col_name = get_comparison_p_val_col(comparison)
+        df[col_name] = df[col_name].apply(
+            lambda p: (
+                "<0.001"
+                if p < 0.001
+                else "<0.01" if p < 0.01 else "<0.05" if p < 0.05 else f"{p:.2f}"
+            )
+        )
+        # Set the p-value for the best to N/A
+        comparison_idx = get_comparison_model_index(df=df, comparison=comparison)
+        df.loc[comparison_idx, col_name] = "—"
+        if comparison == HUMAN_SUPERFORECASTER:
+            p_value_cols[col_name] = "P-value to supers"
+        elif comparison == HUMAN_PUBLIC:
+            p_value_cols[col_name] = "P-value to public"
+        else:
+            raise ValueError("Comparison model not handled")
+
+    df["x_pct_oracle_equivalent"] = df["x_pct_oracle_equivalent"].map("{:.0%}".format)
 
     # For website communication purposes, change "freeze values" to "crowd forecast"
     benchmark_mask = df["organization"] == constants.BENCHMARK_NAME
@@ -1090,7 +1115,7 @@ def write_leaderboard(
             f"{primary_scoring_func.__name__}_overall",
             "n_overall",
             f"{primary_scoring_func.__name__}_ci",
-            "p_value_one_sided",
+            *p_value_cols.keys(),
             "pct_times_best_performer",
             "pct_times_top_5_percentile",
             "x_pct_oracle_equivalent",
@@ -1112,7 +1137,7 @@ def write_leaderboard(
             f"{primary_scoring_func.__name__}_overall": "Overall",
             "n_overall": "N",
             f"{primary_scoring_func.__name__}_ci": "95% CI",
-            "p_value_one_sided": "P-value to best",
+            **p_value_cols,
             "pct_times_best_performer": "Pct times № 1",
             "pct_times_top_5_percentile": "Pct times top 5%",
             "x_pct_oracle_equivalent": "x% oracle equiv",
@@ -1137,6 +1162,7 @@ def write_leaderboard(
     )
 
     # Write JS leaderboard for website
+    df = df.drop(columns="Pct times № 1")
     write_leaderboard_js_files(
         df=df,
         leaderboard_type=leaderboard_type,
@@ -1631,76 +1657,111 @@ def get_confidence_interval(
     return df_leaderboard
 
 
-def get_comparison_to_best_model(
+def get_comparison_p_val_col(comparison: dict) -> str:
+    """Return the column name returned by `get_comparison_p_val()`.
+
+    Args:
+        comparison (dict): A dictionary containing model comparison details
+
+    Returns:
+        str: The column name
+    """
+    return f"p_value_one_sided_{comparison['model']}"
+
+
+def get_comparison_model_index(df: pd.DataFrame, comparison: dict) -> int:
+    """
+    Return the index of a row in a DataFrame matching comparison.
+
+    Args:
+        df (pandas.DataFrame): DataFrame containing model data with 'model', 'organization', and
+            'model_organization' columns.
+        comparison (dict): Dictionary with 'model', 'organization', and 'model_organization' keys
+            specifying the model to find.
+
+    Returns:
+        int: The index of the matching row in the DataFrame.
+    """
+    comparison_mask = (
+        (df["model"] == comparison["model"])
+        & (df["organization"] == comparison["organization"])
+        & (df["model_organization"] == comparison["model_organization"])
+    )
+    idx = df.index[comparison_mask]
+    if len(idx) != 1:
+        raise ValueError(f"Error with provided comparison model: {comparison}.")
+    return idx[0]
+
+
+def get_comparison_p_val(
     df_leaderboard: pd.DataFrame,
     df_simulated_scores: pd.DataFrame,
-    primary_scoring_func: Callable[[pd.DataFrame], pd.DataFrame],
+    comparison: dict,
     is_centered: bool = False,
     bh_adjust_p_vals: bool = False,
 ) -> pd.DataFrame:
-    """Compute one-sided p-values comparing each model to the best performer.
+    """Compute one-sided p-values comparing each model to the human comparison groups.
 
     Args:
         df_leaderboard (pd.DataFrame): Leaderboard.
         df_simulated_scores (pd.DataFrame): Bootstrapped replicates of overall scores.
-        primary_scoring_func (Callable[[pd.DataFrame], pd.DataFrame]):
-            Function to compute the primary overall score.
+        comparison (dict): dict showing model to use for comparison.
         is_centered (bool): Center p-value calculation on observed score differences.
         bh_adjust_p_vals (bool): Apply Benjamini-Hochberg adjustment if True.
 
     Returns:
-        pd.DataFrame: Leaderboard with updated p_value_one_sided (and adjusted) columns.
+        pd.DataFrame: Leaderboard with updated p_value column.
     """
-    logger.info(colored("Comparing to best model", "red"))
-    if not callable(primary_scoring_func):
-        raise ValueError("The primary scoring function must be callable.")
+    if not comparison:
+        raise ValueError("Must provide comparison")
+    logger.info(colored(f"Comparing to {comparison['model']}", "red"))
 
-    overall_score_col = f"{primary_scoring_func.__name__}_overall"
+    overall_score_col = "two_way_fixed_effects_overall"
     if overall_score_col not in df_leaderboard.columns:
-        raise ValueError(f"Metric {overall_score_col} not found in leaderboard DataFrame.")
-
-    if primary_scoring_func.__name__ != "two_way_fixed_effects":
         raise ValueError(
-            "This function only works for the 2 way fixed effects model. For other models, ensure "
-            "the best model is identified by `best_idx` (2wfe best model has the lowest score, "
-            "other scoring functions may identify the best model as the one with the highest "
-            "score.)"
+            f"Metric {overall_score_col} not found in leaderboard DataFrame."
+            "This function only works for scoring methods where lower scores are "
+            "better. Adjust if testing for scoring methods where higher is better."
         )
 
-    observed_best_idx = df_leaderboard[overall_score_col].idxmin()
-    observed_best_model_pk = df_leaderboard.loc[observed_best_idx, "model_pk"]
-    observed_best_mean_score = df_leaderboard.loc[observed_best_idx, overall_score_col]
+    out_col = get_comparison_p_val_col(comparison)
+    comparison_idx = get_comparison_model_index(df=df_leaderboard, comparison=comparison)
+    comparison_model_pk = df_leaderboard.loc[comparison_idx, "model_pk"]
+    comparison_mean_score = df_leaderboard.loc[comparison_idx, overall_score_col]
 
-    sim_best_scores = df_simulated_scores.loc[observed_best_model_pk]
+    sim_comparison_scores = df_simulated_scores.loc[comparison_model_pk]
 
     if is_centered:
-        observed_diffs = observed_best_mean_score - df_leaderboard[overall_score_col]
+        observed_diffs = comparison_mean_score - df_leaderboard[overall_score_col]
         observed_diff_dict = dict(zip(df_leaderboard["model_pk"], observed_diffs))
         p_value_one_sided = {
             model_pk: np.mean(
-                ((sim_best_scores.values - sim_comp_scores.values) - observed_diff_dict[model_pk])
+                (
+                    (sim_comparison_scores.values - sim_comp_scores.values)
+                    - observed_diff_dict[model_pk]
+                )
                 <= observed_diff_dict[model_pk]
             )
             for model_pk, sim_comp_scores in df_simulated_scores.iterrows()
         }
     else:
-        comparison_df = df_simulated_scores.le(sim_best_scores, axis=1)
+        comparison_df = df_simulated_scores.le(sim_comparison_scores, axis=1)
         p_value_one_sided = comparison_df.mean(axis=1)
 
-    df_leaderboard["p_value_one_sided"] = df_leaderboard["model_pk"].map(p_value_one_sided)
-    df_leaderboard.loc[observed_best_idx, "p_value_one_sided"] = -1
+    df_leaderboard[out_col] = df_leaderboard["model_pk"].map(p_value_one_sided)
+    df_leaderboard.loc[comparison_idx, out_col] = -1
 
     if bh_adjust_p_vals:
         # P-value adjustment for multiple tests to avoid the multiple comparisons problem.
         # Drop best row for p-value adjustment
-        mask = df_leaderboard.index != observed_best_idx
+        mask = df_leaderboard.index != comparison_idx
         _, bh_adj_pvals, _, _ = multipletests(
-            pvals=df_leaderboard.loc[mask, "p_value_one_sided"],
+            pvals=df_leaderboard.loc[mask, out_col],
             alpha=0.05,
             method="fdr_bh",
         )
-        df_leaderboard.loc[mask, "p_value_one_sided_bh_adj"] = bh_adj_pvals
-        df_leaderboard.loc[observed_best_idx, "p_value_one_sided_bh_adj"] = -1
+        df_leaderboard.loc[mask, f"{out_col}_bh_adj"] = bh_adj_pvals
+        df_leaderboard.loc[comparison_idx, f"{out_col}_bh_adj"] = -1
 
     return df_leaderboard
 
@@ -2039,13 +2100,13 @@ def make_leaderboard(
         primary_scoring_func=primary_scoring_func,
     )
 
-    # Compare to best model
-    df_leaderboard = get_comparison_to_best_model(
-        df_leaderboard=df_leaderboard,
-        df_simulated_scores=df_simulated_scores_overall,
-        primary_scoring_func=primary_scoring_func,
-        is_centered=False,
-    )
+    # Compare to human models
+    for comparison in HUMAN_MODELS:
+        df_leaderboard = get_comparison_p_val(
+            df_leaderboard=df_leaderboard,
+            df_simulated_scores=df_simulated_scores_overall,
+            comparison=comparison,
+        )
 
     # Simulation performance measures
     df_leaderboard = get_simulation_performance_metrics(

@@ -123,6 +123,31 @@ def download_dff_and_prepare_dfr() -> tuple:
     event_types = list(event_types_acled) + ["fatalities"]
 
     df = df[["country", "event_date", "event_type", "fatalities"]].copy()
+
+    # The values for the `event_date` field in the following entries are incorrect.
+    # They are "0025-" for "2025" and "0024-" for "2024-"
+    #
+    # Bug reported to ACLED on 26 Sept 2025
+    #
+    # 2025:
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=ABW24
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=YEM104718
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=YEM99604
+    #
+    # 2024:
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=NCL346
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=NCL351
+    # * https://acleddata.com/api/acled/read?_format=json&event_id_cnty=PYF127
+    def fix_year_prefix(date_str):
+        if isinstance(date_str, str):
+            if date_str.startswith("0025-"):
+                return "2025-" + date_str[5:]
+            if date_str.startswith("0024-"):
+                return "2024-" + date_str[5:]
+        return date_str
+    df["event_date"] = df["event_date"].apply(fix_year_prefix)
+    # End fix bug with ACLED data
+
     df["event_date"] = pd.to_datetime(df["event_date"])
     return (
         (

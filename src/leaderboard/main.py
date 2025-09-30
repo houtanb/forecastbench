@@ -1060,15 +1060,15 @@ def write_leaderboard(
     # Replace NaN with empty strings for display
     df = df.fillna("")
 
-    # Round columns to LEADERBOARD_DECIMAL_PLACES decimal places
-    numeric_cols = df.select_dtypes(include="number").columns
-    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
-
     # Add rank
     df["Rank"] = df[f"{primary_scoring_func.__name__}_overall"].rank(
         ascending=True,
         method="min",
     )
+
+    # Round columns to LEADERBOARD_DECIMAL_PLACES decimal places
+    numeric_cols = df.select_dtypes(include="number").columns
+    df[numeric_cols] = df[numeric_cols].round(LEADERBOARD_DECIMAL_PLACES)
 
     for col in [
         "n_market",

@@ -20,6 +20,7 @@ entrypoint.sh: entrypoint.sh.template
 		-e 's/WEBSITE_STAGING_ASSETS_BUCKET/$(WEBSITE_STAGING_ASSETS_BUCKET)/g' \
 		-e 's/WEBSITE_BUCKET/$(WEBSITE_BUCKET)/g' \
 		-e 's/NO_CACHE/$(NO_CACHE)/g' \
+		-e "s/BUILD_ENV/$$( if [ \"$(BUILD_ENV)\" = \"prod\" ]; then echo production; else echo development; fi )/g" \
 		$< > $@
 
 WEBSITE_VOLUME := $(subst .,-,$(WEBSITE_BUCKET))
@@ -31,7 +32,6 @@ deploy : entrypoint.sh Dockerfile .gcloudignore
 		--exclude='entrypoint.sh.template' \
 		--exclude='_site/' \
 		--exclude='$(UPLOAD_DIR)/' \
-		--exclude='_config_dev.yml' \
 		--exclude='assets/js/leaderboard_baseline_compact.js' \
 		--exclude='assets/js/leaderboard_baseline_full.js' \
 		--exclude='assets/js/leaderboard_tournament_compact.js' \
@@ -40,10 +40,6 @@ deploy : entrypoint.sh Dockerfile .gcloudignore
 		--exclude='assets/data/sota_graph_tournament.csv' \
 		--exclude='assets/data/parity_dates.json' \
 		./ $(UPLOAD_DIR)/
-	if [ "$(BUILD_ENV)" = "dev" ]; then \
-		printf "\n" >> $(UPLOAD_DIR)/_config.yml; \
-		cat _config_dev.yml >> $(UPLOAD_DIR)/_config.yml; \
-	fi
 	gcloud run jobs deploy \
 		func-website \
 		--project $(CLOUD_PROJECT) \

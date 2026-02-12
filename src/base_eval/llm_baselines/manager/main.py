@@ -1,6 +1,5 @@
 """Run zero-shot and scratchpad evaluations for LLM models."""
 
-import argparse
 import logging
 import os
 import sys
@@ -10,30 +9,27 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))
-from helpers import cloud_run, constants, decorator, question_sets  # noqa: E402
+from helpers import cloud_run, constants, decorator, llm, question_sets  # noqa: E402
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_env_vars() -> constants.RunMode:
     """
-    Parse command-line arguments for the LLM baselines manager.
+    Parse and validate environment variables.
 
-    Args:
+    Environment variables:
+        TEST_OR_PROD (str): Required. Must be valid constants.RunMode
+    A rgs:
         None
 
     Returns:
-        argparse.Namespace: Parsed arguments with:
-            - mode (constants.RunMode): Run mode ("TEST" or "PROD"), case-insensitive; defaults to TEST.
+        result (tuple[str, constants.RunMode, str, str]):
+            (forecast_due_date, run_mode, model_to_test, prompt_type).
     """
-    parser = argparse.ArgumentParser(description="Run LLM evaluations.")
-    parser.add_argument(
-        "mode",
-        nargs="?",
-        type=constants.RunMode,
-        choices=list(constants.RunMode),
-        default=constants.RunMode.TEST,
-        help="Run mode: TEST for specific models and 2 questions, PROD for all models and questions",
-    )
-    return parser.parse_args()
+    try:
+        return constants.RunMode(os.getenv("TEST_OR_PROD"))
+    except ValueError:
+        logger.error("`TEST_OR_PROD` must be one of TEST or PROD.")
+        sys.exit(1)
 
 
 @decorator.log_runtime
@@ -47,19 +43,20 @@ def main() -> None:
     Returns:
         None
     """
-    args = parse_arguments()
+    run_mode = parse_env_vars()
 
     forecast_due_date = question_sets.get_field_from_latest_question_set_file("forecast_due_date")
 
-    logger.info(f"Running {args.mode.value} run of LLM baselines for {forecast_due_date}-llm.json")
+    logger.info(f"Running {run_mode.value} run of LLM baselines for {forecast_due_date}-llm.json")
 
     timeout = cloud_run.timeout_1h * 24
-    task_count = len(constants.MODELS_TO_RUN.keys()) * len(constants.PROMPT_TYPES)
+    task_count = len(llm.MODEL_RUNS) * len(llm.PROMPT_TYPES)
+    logger.info(f"Creating {task_count} workers...")
     operation = cloud_run.call_worker(
         job_name="func-baseline-llm-forecasts-worker",
         env_vars={
             "FORECAST_DUE_DATE": forecast_due_date,
-            "TEST_OR_PROD": args.mode.value,
+            "TEST_OR_PROD": run_mode.value,
         },
         task_count=task_count,
         timeout=timeout,

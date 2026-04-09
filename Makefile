@@ -101,7 +101,7 @@ all: deploy
 
 deploy: orchestration questions metadata resolve leaderboards curate-questions website baselines
 
-questions: manifold metaculus acled infer yfinance polymarket wikipedia fred dbnomics
+questions: manifold metaculus acled infer yfinance polymarket wikipedia fred dbnomics kalshi
 
 orchestration: nightly-worker-job nightly-manager-job compress_buckets
 
@@ -195,6 +195,14 @@ dbnomics-fetch:
 
 dbnomics-update-questions:
 	$(MAKE) -C src/questions/dbnomics/update_questions || echo "* $@" >> $(MAKE_FAILURE_LOG)
+
+kalshi: kalshi-fetch kalshi-update-questions
+
+kalshi-fetch:
+	$(MAKE) -C src/questions/kalshi/fetch || echo "* $@" >> $(MAKE_FAILURE_LOG)
+
+kalshi-update-questions:
+	$(MAKE) -C src/questions/kalshi/update_questions || echo "* $@" >> $(MAKE_FAILURE_LOG)
 
 tag-questions:
 	$(MAKE) -C src/metadata/tag_questions || echo "* $@" >> $(MAKE_FAILURE_LOG)

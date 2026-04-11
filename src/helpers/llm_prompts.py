@@ -132,6 +132,7 @@ Output Requirement: Provide only the extracted probability as a decimal value be
 """  # noqa: B950
 
 
+_NL = "\n"
 ASSIGN_CATEGORY_PROMPT = (
     """Question: {question}
 
@@ -139,7 +140,7 @@ Background: {background}
 
 """
     f"""Options:
-[{"'" + "',\n'".join(constants.QUESTION_CATEGORIES) + "'"}]
+[{"'" + f"',{_NL}'".join(constants.QUESTION_CATEGORIES) + "'"}]
 
 Instruction: Assign a category for the given question.
 

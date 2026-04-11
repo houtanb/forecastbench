@@ -1,4 +1,4 @@
-"""LLM-related util."""
+"""LLM evaluation utilities: prompt building, question processing, forecast generation."""
 
 import json
 import logging
@@ -11,41 +11,20 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import partial
 
-import anthropic
-import openai
-import together
-from google import genai
-from google.genai import types
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
 from termcolor import colored
 
 from . import (
     constants,
     data_utils,
     env,
-    keys,
     llm_prompts,
     question_curation,
 )
+from .llm import REFORMAT_MODEL
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))  # noqa: E402
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../utils"))  # noqa: E402
 from utils import gcp  # noqa: E402
-
-anthropic_console = anthropic.Anthropic(api_key=keys.API_KEY_ANTHROPIC)
-oai = openai.OpenAI(api_key=keys.API_KEY_OPENAI)
-together.api_key = keys.API_KEY_TOGETHERAI
-google_ai_client = genai.Client(api_key=keys.API_KEY_GOOGLE)
-togetherai_client = openai.OpenAI(
-    api_key=keys.API_KEY_TOGETHERAI,
-    base_url="https://api.together.xyz/v1",
-)
-xai_client = openai.OpenAI(
-    api_key=keys.API_KEY_XAI,
-    base_url="https://api.x.ai/v1",
-)
-mistral_client = MistralClient(api_key=keys.API_KEY_MISTRAL)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -53,26 +32,11 @@ logger = logging.getLogger(__name__)
 TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
 
 
-def infer_model_source(model_name):
-    """
-    Infer the model source from the model name.
-
-    Args:
-    - model_name (str): The name of the model.
-    """
-    if "ft:gpt" in model_name:  # fine-tuned GPT-3 or 4
-        return constants.OAI_SOURCE
-    if model_name not in constants.MODEL_NAME_TO_SOURCE:
-        raise ValueError(f"Invalid model name: {model_name}")
-    return constants.MODEL_NAME_TO_SOURCE[model_name]
-
-
 def get_local_final_submit_directory(
     prompt_type: str,
     run_mode: constants.RunMode,
 ) -> str:
-    """
-    Construct the local directory path for final forecast submission.
+    """Construct the local directory path for final forecast submission.
 
     Args:
         prompt_type (str): The prompt style used for the run (e.g., "zero_shot").
@@ -87,361 +51,8 @@ def get_local_final_submit_directory(
     return directory
 
 
-def get_model_org(model_name):
-    """
-    Get the model org given the model.
-
-    Args:
-    - model_name (str): The name of the model.
-    """
-    if model_name not in constants.MODEL_NAME_TO_ORG:
-        raise ValueError(f"Invalid model name: {model_name}")
-    return constants.MODEL_NAME_TO_ORG[model_name]
-
-
-def get_response_with_retry(api_call, wait_time, error_msg):
-    """
-    Make an API call and retry on failure after a specified wait time.
-
-    Args:
-        api_call (function): API call to make.
-        wait_time (int): Time to wait before retrying, in seconds.
-        error_msg (str): Error message to print on failure.
-    """
-    while True:
-        try:
-            return api_call()
-        except Exception as e:
-            if "repetitive patterns" in str(e):
-                logger.info(
-                    "Repetitive patterns detected in the prompt. Modifying prompt and retrying..."
-                )
-                return "need_a_new_reformat_prompt"
-
-            logger.info(f"{error_msg}: {e}")
-            logger.info(f"Waiting for {wait_time} seconds before retrying...")
-
-            time.sleep(wait_time)
-
-
-def get_response_from_oai_model(
-    model_name, prompt, system_prompt, max_tokens, temperature, wait_time
-):
-    """
-    Make an API call to the OpenAI API and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "gpt-4").
-        prompt (str): Fully specififed prompt to use for the API call.
-        system_prompt (str): Prompt to use for system prompt.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-        """
-        Make an API call to the OpenAI API, without retrying on failure.
-
-        Returns:
-            str: Response string from the API call.
-        """
-
-        def get_bool_param_from_model_def(p):
-            if p == "reasoning_model" and model_name == "gpt-5-mini":
-                # Hack: workaround until LLM forecasters are fixed
-                # This supports using gpt-5-mini as the question_curation.METADATA_MODEL_NAME
-                return True
-            return constants.MODELS_TO_RUN.get(model_name, {}).get(p, False)
-
-        if system_prompt:
-            logger.error("System prompt should not be sent. Keeping check for legacy.")
-            sys.exit(1)
-
-        params = {
-            "model": model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-        }
-
-        is_reasoning_model = get_bool_param_from_model_def("reasoning_model")
-        if not is_reasoning_model:
-            params["temperature"] = temperature
-
-        response = oai.chat.completions.create(**params)
-        return response.choices[0].message.content
-
-    return get_response_with_retry(
-        api_call,
-        wait_time,
-        "OpenAI API request exceeded rate limit.",
-    )
-
-
-def get_response_from_xai_model(model_name, prompt, max_tokens, temperature, wait_time):
-    """
-    Make an API call to the xAI API and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "claude-2").
-        prompt (str): Fully specififed prompt to use for the API call.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-        response = xai_client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=temperature,
-        )
-        return response.choices[0].message.content
-
-    return get_response_with_retry(
-        api_call,
-        wait_time,
-        "xAI API request exceeded rate limit.",
-    )
-
-
-def get_response_from_anthropic_model(model_name, prompt, max_tokens, temperature, wait_time):
-    """
-    Make an API call to the Anthropic API and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "claude-2").
-        prompt (str): Fully specififed prompt to use for the API call.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-
-        with anthropic_console.messages.stream(
-            model=model_name,
-            temperature=temperature,
-            max_tokens=1024,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        ) as stream:
-            stream.until_done()
-
-        return stream.get_final_message().content[0].text
-
-    return get_response_with_retry(
-        api_call, wait_time, "Anthropic API request exceeded rate limit."
-    )
-
-
-def get_response_from_mistral_model(model_name, prompt, max_tokens, temperature, wait_time):
-    """
-    Make an API call to the OpenAI API and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "gpt-4").
-        prompt (str): Fully specififed prompt to use for the API call.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-        """
-        Make an API call to the OpenAI API, without retrying on failure.
-
-        Returns:
-            str: Response string from the API call.
-        """
-        messages = [ChatMessage(role="user", content=prompt)]
-
-        # No streaming
-        chat_response = mistral_client.chat(
-            model=model_name,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-        return chat_response.choices[0].message.content
-
-    return get_response_with_retry(api_call, wait_time, "Mistral API request exceeded rate limit.")
-
-
-def get_response_from_together_ai_model(model_name, prompt, max_tokens, temperature, wait_time):
-    """
-    Make an API call to the Together AI API and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "togethercomputer/
-        llama-2-13b-chat").
-        prompt (str): Fully specififed prompt to use for the API call.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-        nonlocal max_tokens  # Allow modification of max_tokens
-
-        # Get the token limit for this model
-        model_token_limit = constants.MODEL_TOKEN_LIMITS.get(model_name)
-
-        try:
-            chat_completion = togetherai_client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                temperature=temperature,
-            )
-            response = chat_completion.choices[0].message.content
-            return response
-        except Exception as e:
-            error_message = str(e)
-            if "Input validation error" in error_message:
-                # Extract the number of input tokens from the error message
-                match = re.search(r"Given: (\d+) `inputs` tokens", error_message)
-                if match:
-                    input_tokens = int(match.group(1))
-                    # Adjust max_tokens based on the model's limit
-                    max_tokens = model_token_limit - input_tokens - 50  # Subtracting 50 for safety
-                    logger.info(f"Adjusted max_tokens to {max_tokens}")
-                    if max_tokens <= 0:
-                        raise ValueError(
-                            f"Prompt is too long for model {model_name}. It uses {input_tokens} tokens, "
-                            f"which exceeds or equals the model's limit of {model_token_limit} tokens."
-                        )
-                    # Retry the API call with adjusted max_tokens
-                    return api_call()
-            # If it's not the token limit error or we couldn't parse it, re-raise
-            raise
-
-    return get_response_with_retry(
-        api_call, wait_time, "Together AI API request exceeded rate limit."
-    )
-
-
-def get_response_from_google_model(model_name, prompt, max_tokens, temperature, wait_time):
-    """
-    Make an API call to the Together AI API and retry on failure after a specified wait time.
-
-    Args:
-        model (str): Name of the model to use (such as "gemini-pro").
-        prompt (str): Initial prompt for the API call.
-        max_tokens (int): Maximum number of tokens to sample.
-        temperature (float): Sampling temperature.
-        wait_time (int): Time to wait before retrying, in seconds.
-
-    Returns:
-        str: Response string from the API call.
-    """
-
-    def api_call():
-        response = google_ai_client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                candidate_count=1,
-                temperature=temperature,
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                    disable=True,
-                ),
-            ),
-        )
-        return response.text
-
-    return get_response_with_retry(
-        api_call, wait_time, "Google AI API request exceeded rate limit."
-    )
-
-
-def get_response_from_model(
-    model_name,
-    prompt,
-    system_prompt="",
-    max_tokens=2000,
-    temperature=0.8,
-    wait_time=30,
-):
-    """
-    Make an API call to the specified model and retry on failure after a specified wait time.
-
-    Args:
-        model_name (str): Name of the model to use (such as "gpt-4").
-        prompt (str): Fully specififed prompt to use for the API call.
-        system_prompt (str, optional): Prompt to use for system prompt.
-        max_tokens (int, optional): Maximum number of tokens to generate.
-        temperature (float, optional): Sampling temperature.
-        wait_time (int, optional): Time to wait before retrying, in seconds.
-    """
-    model_source = infer_model_source(model_name)
-    if model_source == constants.OAI_SOURCE:
-        return get_response_from_oai_model(
-            model_name, prompt, system_prompt, max_tokens, temperature, wait_time
-        )
-    elif model_source == constants.ANTHROPIC_SOURCE:
-        return get_response_from_anthropic_model(
-            model_name, prompt, max_tokens, temperature, wait_time
-        )
-    elif model_source == constants.TOGETHER_AI_SOURCE:
-        return get_response_from_together_ai_model(
-            model_name, prompt, max_tokens, temperature, wait_time
-        )
-    elif model_source == constants.GOOGLE_SOURCE:
-        return get_response_from_google_model(
-            model_name, prompt, max_tokens, temperature, wait_time
-        )
-    elif model_source == constants.MISTRAL_SOURCE:
-        return get_response_from_mistral_model(
-            model_name, prompt, max_tokens, temperature, wait_time
-        )
-    elif model_source == constants.XAI_SOURCE:
-        return get_response_from_xai_model(model_name, prompt, max_tokens, temperature, wait_time)
-    else:
-        return "Not a valid model source."
-
-
 def extract_probability(text):
-    """
-    Extract a probability value from the given text.
-
-    Search through the input text for numeric patterns that could represent probabilities.
-    The search checks for plain numbers, percentages, or numbers flanked by asterisks and
-    attempts to convert these into a probability value (a float between 0 and 1).
-    Ignore exact values of 0.0 and 1.0.
+    """Extract a probability value from the given text.
 
     Args:
         text (str): The text from which to extract the probability.
@@ -466,32 +77,16 @@ def extract_probability(text):
 
         if 0 <= number <= 1:
             if number == 1.0 or number == 0.0:
-                continue  # Skip this match and continue to the next one
+                continue
             return number
 
     return None
 
 
 def convert_string_to_list(string_list):
-    """
-    Convert a formatted string into a list of floats.
-
-    Strip leading and trailing whitespace from the input string, remove square brackets,
-    split the string by commas, and convert each element to a float. Replace non-numeric
-    entries (denoted by '*') with 0.5.
-
-    Parameters:
-    string_list (str): A string representation of a list of numbers, enclosed in square
-                       brackets and separated by commas.
-
-    Returns:
-    list: A list of floats, where non-numeric elements are replaced with 0.5.
-    """
-    # Remove leading and trailing whitespace
+    """Convert a formatted string into a list of floats."""
     string_list = string_list.strip()
-    # Remove square brackets at the beginning and end
     string_list = string_list[1:-1]
-    # Split the string by commas and convert each element to a float
     list_values = string_list.split(",")
 
     actual_list = [
@@ -507,25 +102,7 @@ def convert_string_to_list(string_list):
 
 
 def reformat_answers(response, prompt="N/A", question="N/A", single=False):
-    """
-    Reformat the given response based on whether a single response or multiple responses are required.
-
-    This function adjusts the response formatting by using predefined prompt templates and sends
-    it to a model for evaluation. Depending on the 'single' flag, it either extracts a probability
-    or converts the response to a list.
-
-    Parameters:
-    - response (str): The original response from the model that needs to be reformatted.
-    - prompt (str, optional): The user prompt to use in the reformatting process. Defaults to 'N/A'.
-    - question (str or dict, optional): The question data used to format the response when not single.
-      Defaults to 'N/A'.
-    - single (bool, optional): Flag to determine if the response should be handled as a single response.
-      Defaults to False.
-
-    Returns:
-    - str or list: The reformatted model response, either as a probability (if single is True) or as a
-      list of responses (if single is False).
-    """
+    """Reformat the given response using the REFORMAT_MODEL."""
 
     def reformatted_raw_response(
         response, prompt, question, REFORMAT_SINGLE_PROMPT, REFORMAT_PROMPT, single=False
@@ -538,12 +115,10 @@ def reformat_answers(response, prompt="N/A", question="N/A", single=False):
                 model_response=response,
                 n_horizons=len(question["resolution_dates"]),
             )
-        raw_response = get_response_from_model(
+        raw_response = REFORMAT_MODEL.get_response(
             prompt=reformat_prompt,
             max_tokens=100,
-            model_name="gpt-4o-mini",
             temperature=0,
-            wait_time=30,
         )
         return raw_response
 
@@ -572,15 +147,7 @@ def reformat_answers(response, prompt="N/A", question="N/A", single=False):
 
 
 def capitalize_substrings(model_name):
-    """
-    Capitalize the first letter of each substring in a model name.
-
-    Args:
-        model_name (str): The model name to be capitalized.
-
-    Returns:
-        str: The capitalized model name.
-    """
+    """Capitalize the first letter of each substring in a model name."""
     model_name = model_name.replace("gpt", "GPT") if "gpt" in model_name else model_name
     substrings = model_name.split("-")
     capitalized_substrings = [
@@ -590,19 +157,18 @@ def capitalize_substrings(model_name):
     return "-".join(capitalized_substrings)
 
 
-def generate_final_forecast_files(forecast_due_date, prompt_type, models, run_mode):
-    """
-    Generate final forecast files for given models, merging individual forecasts into final files.
+def generate_final_forecast_files(forecast_due_date, prompt_type, model_run, run_mode):
+    """Generate final forecast files for a model run.
 
     Args:
         forecast_due_date (str): The forecast_due_date for the forecast.
         prompt_type (str): The type of prompt used.
-        models (dict): A dictionary of models with their information.
-
-    Returns:
-        None
+        model_run: A ModelRun object.
+        run_mode: RunMode enum value.
     """
-    models_to_test = list(models.keys())
+    model = model_run.name
+    org = model_run.org
+    model_id = model_run.model_id
 
     def get_final_dir(with_freeze_values, run_mode):
         final_dir = "final_with_freeze" if with_freeze_values else "final"
@@ -610,7 +176,7 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, run_mo
             final_dir += "_test"
         return final_dir
 
-    def write_file(model, with_freeze_values, run_mode):
+    def write_file(with_freeze_values, run_mode):
         current_model_forecasts = []
         dataset_dir = f"{prompt_type}/dataset"
         market_dir = f"{prompt_type}/market"
@@ -639,11 +205,10 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, run_mo
                 json_line = json.dumps(entry)
                 file.write(json_line + "\n")
 
-    def create_final_file(model, with_freeze_values, run_mode):
+    def create_final_file(with_freeze_values, run_mode):
         final_dir = get_final_dir(with_freeze_values, run_mode)
         file_path = f"/tmp/{prompt_type}/{final_dir}/{model}"
         questions = data_utils.read_jsonl(file_path)
-        org = get_model_org(model)
 
         local_submit_dir = get_local_final_submit_directory(
             prompt_type=prompt_type,
@@ -664,15 +229,11 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, run_mo
                 f"{org}.{model}_{file_prompt_type}.json"
             )
 
-        model_name = (
-            models[model]["full_name"]
-            if "/" not in models[model]["full_name"]
-            else models[model]["full_name"].split("/")[1]
-        )
+        display_name = model_id if "/" not in model_id else model_id.split("/")[1]
 
         forecast_file = {
             "organization": constants.BENCHMARK_NAME,
-            "model": f"{capitalize_substrings(model_name)} ({file_prompt_type.replace('_', ' ')})",
+            "model": f"{capitalize_substrings(display_name)} ({file_prompt_type.replace('_', ' ')})",
             "model_organization": org,
             "question_set": f"{forecast_due_date}-llm.json",
             "forecast_due_date": forecast_due_date,
@@ -682,17 +243,16 @@ def generate_final_forecast_files(forecast_due_date, prompt_type, models, run_mo
         with open(new_file_name, "w") as f:
             json.dump(forecast_file, f, indent=4)
 
-    for model in models_to_test:
-        write_file(model=model, with_freeze_values=True, run_mode=run_mode)
-        create_final_file(model=model, with_freeze_values=True, run_mode=run_mode)
-        write_file(model=model, with_freeze_values=False, run_mode=run_mode)
-        create_final_file(model=model, with_freeze_values=False, run_mode=run_mode)
+    write_file(with_freeze_values=True, run_mode=run_mode)
+    create_final_file(with_freeze_values=True, run_mode=run_mode)
+    write_file(with_freeze_values=False, run_mode=run_mode)
+    create_final_file(with_freeze_values=False, run_mode=run_mode)
 
 
 def worker(
     index,
     n_questions,
-    model_name,
+    model_run,
     save_dict,
     questions_to_eval,
     forecast_due_date,
@@ -700,14 +260,26 @@ def worker(
     rate_limit=False,
     market_use_freeze_value=False,
 ):
-    """Worker function for question evaluation."""
+    """Worker function for question evaluation.
+
+    Args:
+        index: Question index to process.
+        n_questions: Total number of questions.
+        model_run: A ModelRun object used for LLM calls.
+        save_dict: Shared dict to store results.
+        questions_to_eval: List of question dicts.
+        forecast_due_date: Date string for the forecast.
+        prompt_type: Prompt variant.
+        rate_limit: Whether to rate-limit.
+        market_use_freeze_value: Whether to use freeze values for market questions.
+    """
     assert prompt_type in ["zero_shot"]
     assert market_use_freeze_value in [True, False]
 
     if save_dict[index] != "":
         return
 
-    logger.info(f"Starting {model_name} - {index + 1}/{n_questions}")
+    logger.info(f"Starting {model_run.name} - {index + 1}/{n_questions}")
 
     if rate_limit:
         start_time = datetime.now()
@@ -716,8 +288,6 @@ def worker(
     is_market_question = question["source"] in question_curation.MARKET_SOURCES
 
     if not is_market_question and market_use_freeze_value:
-        # Don't run for data source questions when market_use_freeze_value is True
-        # because we will have already run these requests when it was False.
         return
 
     if is_market_question:
@@ -744,16 +314,14 @@ def worker(
     )
 
     logger.info(
-        f"IN WORKER: ... {model_name}. {prompt_type}. Is market_question: {is_market_question}."
+        f"IN WORKER: ... {model_run.name}. {prompt_type}. Is market_question: {is_market_question}."
     )
 
     try:
-        response = get_response_from_model(
+        response = model_run.get_response(
             prompt=prompt,
             max_tokens=100,
-            model_name=model_name,
             temperature=0,
-            wait_time=30,
         )
     except Exception as e:
         logger.error(f"Error in worker: {e}")
@@ -766,17 +334,6 @@ def worker(
             save_dict[index] = {
                 "forecast": reformat_answers(response=response, prompt=prompt, question=question)
             }
-    else:
-        if is_market_question:
-            save_dict[index] = {
-                "forecast": reformat_answers(response=response, single=True),
-                "reasoning": response,
-            }
-        else:
-            save_dict[index] = {
-                "forecast": reformat_answers(response=response, prompt=prompt, question=question),
-                "reasoning": response,
-            }
 
     prompt_col = colored(prompt_type, "red", attrs=["bold"])
     question_type_col = colored("Market" if is_market_question else "Dataset", "yellow")
@@ -787,7 +344,7 @@ def worker(
         model_info = f"{model_info} {freeze_col}"
 
     logger.info(
-        f"\n\nModel: {model_name} {model_info}"
+        f"\n\nModel: {model_run.name} {model_info}"
         f"\nQuestion source // id // url: "
         f"{question['source']} // {question['id']} // {question['url']}"
         f"\nForecast: {save_dict[index]['forecast']}\n"
@@ -802,26 +359,40 @@ def worker(
 
 
 def executor(
-    model_name,
+    model_run,
     save_dict,
     questions_to_eval,
     forecast_due_date,
     prompt_type="zero_shot",
     market_use_freeze_value=False,
+    max_workers=None,
 ):
-    """Executor function."""
-    with ThreadPoolExecutor(max_workers=env.NUM_CPUS) as executor:
+    """Execute question evaluation with ThreadPoolExecutor.
+
+    Args:
+        model_run: A ModelRun object.
+        save_dict: Shared dict for results.
+        questions_to_eval: List of question dicts.
+        forecast_due_date: Date string.
+        prompt_type: Prompt variant.
+        market_use_freeze_value: Whether to use freeze values.
+        max_workers: Number of concurrent workers. Defaults to env.NUM_CPUS.
+    """
+    if max_workers is None:
+        max_workers = env.NUM_CPUS
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         worker_with_args = partial(
             worker,
             n_questions=len(questions_to_eval),
-            model_name=model_name,
+            model_run=model_run,
             save_dict=save_dict,
             questions_to_eval=questions_to_eval,
             forecast_due_date=forecast_due_date,
             prompt_type=prompt_type,
             market_use_freeze_value=market_use_freeze_value,
         )
-        return list(executor.map(worker_with_args, range(len(questions_to_eval))))
+        return list(pool.map(worker_with_args, range(len(questions_to_eval))))
 
 
 def get_all_retrieved_info(all_retrieved_info):
@@ -885,7 +456,6 @@ def download_and_read_saved_forecasts(filename, base_file_path):
     """Download saved forecasts from cloud storage."""
     local_filename = "/tmp/" + filename.replace(base_file_path + "/", "")
 
-    # Ensure the directory exists
     os.makedirs(os.path.dirname(local_filename), exist_ok=True)
 
     gcp.storage.download_no_error_message_on_404(
@@ -901,8 +471,7 @@ def download_and_read_saved_forecasts(filename, base_file_path):
 
 
 def process_model(
-    model,
-    models,
+    model_run,
     test_type,
     results,
     questions_to_eval,
@@ -910,20 +479,37 @@ def process_model(
     prompt_type,
     market_use_freeze_value,
     base_file_path,
+    max_workers=None,
 ):
-    """Process a single model for the given questions."""
-    logger.info(f"{model} is using {env.NUM_CPUS} workers.")
+    """Process a single model run for the given questions.
+
+    Args:
+        model_run: A ModelRun object.
+        test_type: The test type string.
+        results: Dict mapping model name to results dict.
+        questions_to_eval: List of question dicts.
+        forecast_due_date: Date string.
+        prompt_type: Prompt variant.
+        market_use_freeze_value: Whether to use freeze values.
+        base_file_path: GCS base path.
+        max_workers: Number of concurrent workers.
+    """
+    workers = max_workers or env.NUM_CPUS
+    logger.info(f"{model_run.name} is using {workers} workers.")
     executor(
-        models[model]["full_name"],
-        results[model],
+        model_run,
+        results[model_run.name],
         questions_to_eval,
         forecast_due_date,
         prompt_type=prompt_type,
         market_use_freeze_value=market_use_freeze_value,
+        max_workers=max_workers,
     )
 
-    current_model_forecasts = generate_forecasts(model, results, questions_to_eval, prompt_type)
-    save_and_upload_results(current_model_forecasts, test_type, model, base_file_path)
+    current_model_forecasts = generate_forecasts(
+        model_run.name, results, questions_to_eval, prompt_type
+    )
+    save_and_upload_results(current_model_forecasts, test_type, model_run.name, base_file_path)
 
 
 def determine_test_type(question_set, prompt_type, market_use_freeze_value, run_mode):
@@ -1002,12 +588,7 @@ def save_and_upload_results(forecasts, test_type, model, base_file_path):
 
 
 def process_questions(questions_file, num_questions_per_question_type=None):
-    """
-    Process questions from a JSON file and categorize them.
-
-    Load questions from the specified JSON file.
-    Optionally limit the number of questions per source.
-    """
+    """Process questions from a JSON file and categorize them."""
     with open(questions_file, "r") as file:
         questions_data = json.load(file)
 

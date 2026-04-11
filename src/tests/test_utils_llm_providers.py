@@ -13,7 +13,7 @@ from helpers.utils_llm.providers.together import TogetherProvider
 from helpers.utils_llm.providers.xai import XAIProvider
 
 
-def _make_model(provider_cls, reasoning_model=False):
+def _make_model(provider_cls):
     """Create a minimal Model for testing."""
     return Model(
         id="test-model",
@@ -21,7 +21,6 @@ def _make_model(provider_cls, reasoning_model=False):
         token_limit=4096,
         provider_cls=provider_cls,
         lab=Lab(name="TestLab"),
-        reasoning_model=reasoning_model,
     )
 
 

@@ -36,7 +36,17 @@ class Model:
     token_limit: int
     provider_cls: Type[BaseLLMProvider]
     lab: Lab
-    reasoning_model: bool = False
+    rate_limit_group: str = ""
+
+    def __post_init__(self) -> None:
+        """Default rate_limit_group to the provider name if not set."""
+        if not self.rate_limit_group:
+            # Reverse-lookup the provider name from the class
+            provider_name = next(
+                (name for name, cls in _PROVIDER_NAME_TO_CLASS.items() if cls is self.provider_cls),
+                self.provider_cls.__name__,
+            )
+            object.__setattr__(self, "rate_limit_group", provider_name)
 
     def get_response(self, prompt: str, **options: Any) -> str:
         """Request a response from the model's provider."""
@@ -142,7 +152,7 @@ MODELS: Final[list[Model]] = [
         token_limit=128_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="gpt-5-mini-2025-08-07",
@@ -150,7 +160,7 @@ MODELS: Final[list[Model]] = [
         token_limit=128_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="gpt-5-nano-2025-08-07",
@@ -158,7 +168,7 @@ MODELS: Final[list[Model]] = [
         token_limit=128_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="gpt-5.1-2025-11-13",
@@ -166,7 +176,7 @@ MODELS: Final[list[Model]] = [
         token_limit=128_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="gpt-5.2-2025-12-11",
@@ -174,7 +184,7 @@ MODELS: Final[list[Model]] = [
         token_limit=128_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="o3-2025-04-16",
@@ -182,7 +192,7 @@ MODELS: Final[list[Model]] = [
         token_limit=200_000,
         provider_cls=OpenAIProvider,
         lab=LABS["OpenAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="gpt-4.1-2025-04-14",
@@ -218,7 +228,7 @@ MODELS: Final[list[Model]] = [
         token_limit=202_752,
         provider_cls=TogetherProvider,
         lab=LABS["Z.ai"],
-        reasoning_model=False,
+
     ),
     Model(
         id="claude-sonnet-4-5-20250929",
@@ -289,7 +299,7 @@ MODELS: Final[list[Model]] = [
         token_limit=2_000_000,
         provider_cls=XAIProvider,
         lab=LABS["xAI"],
-        reasoning_model=True,
+
     ),
     Model(
         id="grok-4-1-fast-non-reasoning",
@@ -297,7 +307,7 @@ MODELS: Final[list[Model]] = [
         token_limit=2_000_000,
         provider_cls=XAIProvider,
         lab=LABS["xAI"],
-        reasoning_model=False,
+
     ),
     Model(
         id="gemini-2.5-pro",
@@ -319,6 +329,6 @@ MODELS: Final[list[Model]] = [
         token_limit=1_048_576,
         provider_cls=GoogleProvider,
         lab=LABS["Google"],
-        reasoning_model=False,
+
     ),
 ]

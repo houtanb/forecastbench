@@ -3,4 +3,3 @@ google-cloud-secret-manager
 slack_sdk
 termcolor
 pandera
-litellm

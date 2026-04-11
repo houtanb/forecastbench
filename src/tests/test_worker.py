@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestThreadPoolSizeCalculation:
     """Thread pool size = max(1, rate_limit // group_size)."""

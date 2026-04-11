@@ -5,14 +5,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .utils_llm.lab_registry import LABS
 from .utils_llm.model_registry import (
     Model,
-    configure_api_keys as _utils_configure_api_keys,
 )
-from .utils_llm.lab_registry import LABS
-from .utils_llm.providers.openai import OpenAIProvider
+from .utils_llm.model_registry import configure_api_keys as _utils_configure_api_keys
 from .utils_llm.providers.anthropic import AnthropicProvider
 from .utils_llm.providers.google import GoogleProvider
+from .utils_llm.providers.openai import OpenAIProvider
 from .utils_llm.providers.together import TogetherProvider
 from .utils_llm.providers.xai import XAIProvider
 
@@ -352,9 +352,7 @@ GOOGLE_RUNS = [
     ),
 ]
 
-MODEL_RUNS: list[ModelRun] = (
-    OPENAI_RUNS + TOGETHER_RUNS + ANTHROPIC_RUNS + XAI_RUNS + GOOGLE_RUNS
-)
+MODEL_RUNS: list[ModelRun] = OPENAI_RUNS + TOGETHER_RUNS + ANTHROPIC_RUNS + XAI_RUNS + GOOGLE_RUNS
 
 # Validation: ensure no duplicate names
 _model_run_names = [m.name for m in MODEL_RUNS]

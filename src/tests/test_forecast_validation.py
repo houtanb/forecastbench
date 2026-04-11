@@ -1,8 +1,6 @@
 """Tests for forecast validation module."""
 
 import json
-import os
-import tempfile
 
 import pytest
 

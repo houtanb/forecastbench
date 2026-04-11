@@ -74,9 +74,7 @@ class ValidationResult:
         return "\n".join(lines)
 
 
-def validate_forecast_file(
-    filepath: str, n_market: int, n_dataset: int
-) -> ValidationResult:
+def validate_forecast_file(filepath: str, n_market: int, n_dataset: int) -> ValidationResult:
     """Validate a forecast file.
 
     Args:

@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestModelRunRateLimitGroup:
     """ModelRun.rate_limit_group defaults to provider.value when not set."""
@@ -39,7 +37,9 @@ class TestModelRunsIntegrity:
         from helpers.llm import MODEL_RUNS
 
         names = [m.name for m in MODEL_RUNS]
-        assert len(names) == len(set(names)), f"Duplicate names: {[n for n in names if names.count(n) > 1]}"
+        assert len(names) == len(
+            set(names)
+        ), f"Duplicate names: {[n for n in names if names.count(n) > 1]}"
 
     def test_all_providers_valid(self):
         from helpers.llm import MODEL_RUNS, Provider
@@ -51,9 +51,9 @@ class TestModelRunsIntegrity:
         from helpers.llm import MODEL_RUNS, RATE_LIMITS
 
         for run in MODEL_RUNS:
-            assert run.rate_limit_group in RATE_LIMITS, (
-                f"{run.name}: rate_limit_group '{run.rate_limit_group}' not in RATE_LIMITS"
-            )
+            assert (
+                run.rate_limit_group in RATE_LIMITS
+            ), f"{run.name}: rate_limit_group '{run.rate_limit_group}' not in RATE_LIMITS"
 
 
 class TestModelRunGetResponse:
@@ -76,7 +76,7 @@ class TestModelRunGetResponse:
             mock_model.get_response.return_value = "response"
             mock_get_model.return_value = mock_model
 
-            result = run.get_response("hello", max_tokens=200)
+            run.get_response("hello", max_tokens=200)
 
             # Call-time kwargs should override self.options
             call_kwargs = mock_model.get_response.call_args[1]

@@ -2,13 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from helpers.utils_llm.lab_registry import Lab
 from helpers.utils_llm.model_registry import Model
-from helpers.utils_llm.lab_registry import LABS, Lab
-from helpers.utils_llm.providers.openai import OpenAIProvider
 from helpers.utils_llm.providers.anthropic import AnthropicProvider
 from helpers.utils_llm.providers.google import GoogleProvider
+from helpers.utils_llm.providers.openai import OpenAIProvider
 from helpers.utils_llm.providers.together import TogetherProvider
 from helpers.utils_llm.providers.xai import XAIProvider
 

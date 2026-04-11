@@ -20,7 +20,7 @@ from . import (
     llm_prompts,
     question_curation,
 )
-from .llm import REFORMAT_MODEL
+from .llm import METADATA_MODEL, REFORMAT_MODEL
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))  # noqa: E402
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../utils"))  # noqa: E402
@@ -30,6 +30,25 @@ from utils import gcp  # noqa: E402
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
+
+
+def get_response_from_model(
+    model_name: str,
+    prompt: str,
+    system_prompt: str = "",
+    max_tokens: int = 2000,
+    temperature: float = 0.8,
+    wait_time: int = 30,
+) -> str:
+    """Compatibility wrapper: delegates to METADATA_MODEL.get_response().
+
+    Used by metadata jobs (validate_questions, tag_questions) that still call this function.
+    """
+    return METADATA_MODEL.get_response(
+        prompt=prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
 
 
 def get_local_final_submit_directory(

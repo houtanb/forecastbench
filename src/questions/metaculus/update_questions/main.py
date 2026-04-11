@@ -22,6 +22,7 @@ from helpers import (  # noqa: E402
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))  # noqa: E402
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../../utils"))
 from utils import gcp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)

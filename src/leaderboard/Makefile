@@ -23,7 +23,7 @@ NUM_CPUS = 8
 
 deploy : main.py requirements.txt Dockerfile model_release_dates.csv .gcloudignore
 	mkdir -p $(LEADERBOARD_UPLOAD_DIR)
-	cp -r $(ROOT_DIR)utils $(LEADERBOARD_UPLOAD_DIR)/
+	cp -r $(ROOT_DIR)utils/utils $(LEADERBOARD_UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/helpers $(LEADERBOARD_UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/sources $(LEADERBOARD_UPLOAD_DIR)/
 	cp $(ROOT_DIR)src/_fb_types.py $(LEADERBOARD_UPLOAD_DIR)/
@@ -55,7 +55,7 @@ deploy : main.py requirements.txt Dockerfile model_release_dates.csv .gcloudigno
 deploy-dataset : main.py requirements.txt Dockerfile model_release_dates.csv .gcloudignore
 	rm -rf $(DATASET_UPLOAD_DIR)
 	mkdir -p $(DATASET_UPLOAD_DIR)
-	cp -r $(ROOT_DIR)utils $(DATASET_UPLOAD_DIR)/
+	cp -r $(ROOT_DIR)utils/utils $(DATASET_UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/helpers $(DATASET_UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/sources $(DATASET_UPLOAD_DIR)/
 	cp $(ROOT_DIR)src/_fb_types.py $(DATASET_UPLOAD_DIR)/

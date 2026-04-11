@@ -30,6 +30,7 @@ from . import (
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))  # noqa: E402
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../utils"))  # noqa: E402
 from utils import gcp  # noqa: E402
 
 anthropic_console = anthropic.Anthropic(api_key=keys.API_KEY_ANTHROPIC)

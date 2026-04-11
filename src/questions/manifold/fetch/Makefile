@@ -14,7 +14,7 @@ Procfile:
 
 deploy : main.py .gcloudignore requirements.txt Procfile
 	mkdir -p $(UPLOAD_DIR)
-	cp -r $(ROOT_DIR)utils $(UPLOAD_DIR)/
+	cp -r $(ROOT_DIR)utils/utils $(UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/helpers $(UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/sources $(UPLOAD_DIR)/
 	cp $(ROOT_DIR)src/_fb_types.py $(UPLOAD_DIR)/

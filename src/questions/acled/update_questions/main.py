@@ -12,6 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))
 from helpers import acled, constants, data_utils, dates, decorator, env  # noqa: E402
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))  # noqa: E402
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../../utils"))
 from utils import gcp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)

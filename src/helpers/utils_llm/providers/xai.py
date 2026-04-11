@@ -39,8 +39,6 @@ class XAIProvider(BaseLLMProvider):
         )
 
     def _call_model(self, model: "Model", prompt: str, **options: Any) -> str:
-        temperature = options.get("temperature")
-        max_tokens = options.get("max_tokens")
         model_name = model.full_name
 
         request_payload: Dict[str, Any] = {
@@ -52,10 +50,8 @@ class XAIProvider(BaseLLMProvider):
                 },
             ],
         }
-        if temperature is not None:
-            request_payload["temperature"] = temperature
-        if max_tokens is not None:
-            request_payload["max_tokens"] = max_tokens
+        # Pass all options through to the SDK
+        request_payload.update(options)
 
         response = self._xai_client.chat.completions.create(**request_payload)
 

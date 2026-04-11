@@ -37,7 +37,6 @@ class GoogleProvider(BaseLLMProvider):
         self._google_ai_client = genai.Client(api_key=api_key)
 
     def _call_model(self, model: "Model", prompt: str, **options: Any) -> str:
-        temperature = options.get("temperature")
         model_name = model.full_name
 
         config_kwargs: Dict[str, Any] = {
@@ -46,8 +45,8 @@ class GoogleProvider(BaseLLMProvider):
                 disable=True,
             ),
         }
-        if temperature is not None:
-            config_kwargs["temperature"] = temperature
+        # Pass all options into GenerateContentConfig
+        config_kwargs.update(options)
 
         response = self._google_ai_client.models.generate_content(
             model=model_name,

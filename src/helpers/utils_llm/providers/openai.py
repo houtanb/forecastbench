@@ -36,25 +36,24 @@ class OpenAIProvider(BaseLLMProvider):
         self._openai_client = OpenAI(api_key=api_key)
 
     def _call_model(self, model: "Model", prompt: str, **options: Any) -> str:
-        temperature = options.get("temperature", 0.8)
-        max_tokens = options.get("max_tokens")
+        temperature = options.pop("temperature", 0.8)
+        max_tokens = options.pop("max_tokens", None)
         model_name = model.full_name
 
-        # OpenAI doesn't support temperature for reasoning models
-        if model.reasoning_model:
-            request_payload: Dict[str, Any] = {
-                "model": model_name,
-                "input": prompt,
-            }
-        else:
-            request_payload = {
-                "model": model_name,
-                "input": prompt,
-                "temperature": temperature,
-            }
+        request_payload: Dict[str, Any] = {
+            "model": model_name,
+            "input": prompt,
+        }
+
+        # Skip temperature when reasoning_effort is present (OpenAI constraint)
+        if "reasoning_effort" not in options:
+            request_payload["temperature"] = temperature
 
         if max_tokens is not None:
             request_payload["max_output_tokens"] = max_tokens
+
+        # Pass remaining kwargs through to the SDK
+        request_payload.update(options)
 
         response = self._openai_client.responses.create(**request_payload)
 

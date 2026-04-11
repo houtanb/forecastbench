@@ -39,8 +39,7 @@ class AnthropicProvider(BaseLLMProvider):
         self._anthropic_console = anthropic.Anthropic(api_key=api_key)
 
     def _call_model(self, model: "Model", prompt: str, **options: Any) -> str:
-        temperature = options.get("temperature")
-        max_tokens = options.get("max_tokens")
+        max_tokens = options.pop("max_tokens", None)
         assert max_tokens is not None, "max_tokens is required for Anthropic models."
         model_name = model.full_name
 
@@ -54,8 +53,8 @@ class AnthropicProvider(BaseLLMProvider):
             ],
             "max_tokens": max_tokens,
         }
-        if temperature is not None:
-            call_args["temperature"] = temperature
+        # Pass remaining kwargs through (temperature, thinking, tools, etc.)
+        call_args.update(options)
 
         with self._anthropic_console.messages.stream(**call_args) as stream:
             stream.until_done()

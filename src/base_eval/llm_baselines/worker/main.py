@@ -125,7 +125,14 @@ def parse_env_vars() -> tuple:
         model_run = MODEL_RUNS[task_num]
 
     # Calculate max_workers from rate limit and group size
-    group_size = int(os.getenv("RATE_LIMIT_GROUP_SIZE", "1"))
+    group_size_env = os.getenv("RATE_LIMIT_GROUP_SIZE")
+    if group_size_env:
+        group_size = int(group_size_env)
+    else:
+        from collections import Counter
+
+        group_counts = Counter(m.rate_limit_group for m in MODEL_RUNS)
+        group_size = group_counts[model_run.rate_limit_group]
     rate_limit = RATE_LIMITS.get(model_run.rate_limit_group, 10)
     max_workers = max(1, rate_limit // group_size)
 

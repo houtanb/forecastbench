@@ -7,6 +7,7 @@ plotly_charts
 !src/www.forecastbench.org/assets/js/section-links.js
 *.json
 !.claude/settings.json
+!.claude/plugins/**
 *.jsonl
 *.csv
 *.bak

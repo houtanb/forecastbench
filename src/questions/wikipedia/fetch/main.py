@@ -18,10 +18,9 @@ from tqdm import tqdm
 from urllib3.util.retry import Retry
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))
-from helpers import data_utils, decorator, env, wikipedia  # noqa: E402
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from utils import gcp  # noqa: E402
+
+from helpers import data_utils, decorator, env, wikipedia  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

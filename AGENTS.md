@@ -24,7 +24,6 @@ Every two weeks, on the forecast due date, forecasts are generated with the code
 ```
 ├── experiments/                  # Scoring rule experiments
 ├── paper/                        # Inputs to the paper: https://arxiv.org/abs/2409.19839
-├── utils/                        # Git submodule for shared organization-level code
 ├── src
 │   ├── base_eval/                # LLM forecasters and naive forecasts
 │   ├── curate_questions/         # Question sampling to create and publish the question set
@@ -45,13 +44,17 @@ Every two weeks, on the forecast due date, forecasts are generated with the code
 $ make setup-python-env
 ```
 
+Shared utilities are installed as the `fri-utils` package from root
+`requirements.runtime.txt`; this repository no longer has a root `utils` git submodule.
+
 ### Before working
 
-Ensure you have set up your virtual env:
+Set up and activate a Python virtual environment before running Python commands.
 
-```bash
-$ source .venv/bin/activate
-```
+For automated agents: treat the repository `.venv` directory as user-owned. Do not
+create it, delete it, install packages into it, or run Make targets that recreate or
+modify it. If `.venv` exists, leave it untouched and create your own environment
+outside the repository, for example under `/tmp/forecastbench-agent-venv`.
 
 Authenticate with GCP (once/day):
 
@@ -102,6 +105,7 @@ NB: `variables.mk` contains both runtime environment variables and variables tha
 * Run `make lint` to apply formatting and check all of the above
 * Configuration is in `pyproject.toml` and `setup.cfg`
 * Functions should use type hints
+* New ForecastBench Python files should not add `from __future__ import annotations`
 * Docstring format:
 
   ```python
@@ -113,10 +117,18 @@ NB: `variables.mk` contains both runtime environment variables and variables tha
   """
   ```
 
+## LLM forecasters
+
+* LLM forecaster `ModelRun(...)` declarations mirror `time-series-benchmark`; all runtime
+  options live in those declarations.
+* LLM forecasting prompt text and parsing behavior are preserved in this corrective pass.
+
 ## Commits
 
 * Run `make lint` and fix any linting errors before committing
-* Run `make test` and fix any test errors before committing
+* Run `make test` and fix any test errors before committing. Automated agents must
+  instead run the equivalent pytest command from their own external virtual
+  environment, because `make test` manages the repository `.venv`.
 * When working on a branch, if you’re revising earlier work, amend the relevant existing commit instead of creating a new one.
 
 ### Commit messages

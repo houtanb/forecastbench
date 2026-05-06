@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from utils import gcp
+
 from helpers import data_utils, decorator, env
 from orchestration import _source_io
 from sources.manifold import ManifoldSource
-from utils import gcp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

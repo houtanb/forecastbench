@@ -1,23 +1,23 @@
 {
   "dataset": {
     "tournament": {
-      "intersection": "June 2026",
-      "lower": "February 2026",
-      "upper": "September 2026"
+      "intersection": "October 2026",
+      "lower": "May 2026",
+      "upper": "February 2027"
     }
   },
   "market": {
     "tournament": {
-      "intersection": "March 2026",
-      "lower": "July 2025",
-      "upper": "July 2026"
+      "intersection": "September 2027",
+      "lower": "July 2026",
+      "upper": "August 2029"
     }
   },
   "overall": {
     "tournament": {
-      "intersection": "November 2026",
-      "lower": "May 2026",
-      "upper": "August 2026"
+      "intersection": "May 2027",
+      "lower": "December 2026",
+      "upper": "March 2028"
     }
   }
 }

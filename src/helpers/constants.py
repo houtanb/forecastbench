@@ -1,7 +1,6 @@
 """Constants."""
 
 import re
-from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -118,20 +117,38 @@ class RunMode(str, Enum):
             return cls.__members__.get(value.upper())
         return None
 
+    @classmethod
+    def from_string(cls, value: str | None) -> "RunMode":
+        """Parse a run mode string, defaulting to TEST for missing or invalid values."""
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.TEST
 
-TEST_FORECAST_FILE_PREFIX = RunMode.TEST.value
+    @property
+    def is_test(self) -> bool:
+        """Return whether this mode should run test-sized workloads."""
+        return self is RunMode.TEST
 
-OAI_SOURCE = "OAI"
-ANTHROPIC_SOURCE = "ANTHROPIC"
-TOGETHER_AI_SOURCE = "TOGETHER"
-GOOGLE_SOURCE = "GOOGLE"
-MISTRAL_SOURCE = "MISTRAL"
-XAI_SOURCE = "XAI"
+    @property
+    def is_prod(self) -> bool:
+        """Return whether this mode should run production workloads."""
+        return self is RunMode.PROD
+
+    @property
+    def forecast_file_prefix(self) -> str:
+        """Return the forecast filename prefix for this run mode."""
+        if self.is_test:
+            return f"{self.value}."
+        return ""
+
 
 ANTHROPIC_ORG = "Anthropic"
 DEEPSEEK_ORG = "DeepSeek"
 MOONSHOT_ORG = "Moonshot"
+MOONSHOT_AI_ORG = "Moonshot AI"
 MINIMAX_ORG = "Minimax"
+MINIMAX_CANONICAL_ORG = "MiniMax"
 GOOGLE_ORG = "Google"
 META_ORG = "Meta"
 MISTRAL_ORG = "Mistral AI"
@@ -159,7 +176,9 @@ ORG_TO_LOGO = {
     ANTHROPIC_ORG: "anthropic.svg",
     DEEPSEEK_ORG: "deepseek.svg",
     MOONSHOT_ORG: "moonshot.svg",
+    MOONSHOT_AI_ORG: "moonshot.svg",
     MINIMAX_ORG: "minimax.svg",
+    MINIMAX_CANONICAL_ORG: "minimax.svg",
     GOOGLE_ORG: "deepmind.svg",
     META_ORG: "meta.svg",
     MISTRAL_ORG: "mistral.svg",
@@ -199,183 +218,3 @@ def get_org_logo(org: str) -> str:
             return f"anonymous_{num}.svg"
 
     return "default.svg"
-
-
-MODELS_TO_RUN = {
-    # oai context window from: https://platform.openai.com/docs/models/
-    "gpt-5.5-2026-04-23": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5.5-2026-04-23",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    "gpt-5.4-2026-03-05": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5.4-2026-03-05",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    "gpt-5.4-mini-2026-03-17": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5.4-mini-2026-03-17",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    "gpt-5.4-nano-2026-03-17": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5.4-nano-2026-03-17",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    "gpt-5-mini-2025-08-07": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5-mini-2025-08-07",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    "gpt-5-nano-2025-08-07": {
-        "source": OAI_SOURCE,
-        "org": OAI_ORG,
-        "full_name": "gpt-5-nano-2025-08-07",
-        "token_limit": 128000,
-        # `reasoning_model` is OpenAI specific. It should be true for o1 and o3 class models.
-        # See model_eval.get_response_from_oai_model() for use.
-        "reasoning_model": True,
-    },
-    # together.ai context window from: https://docs.together.ai/docs/serverless-models
-    "DeepSeek-V4-Pro": {
-        "source": TOGETHER_AI_SOURCE,
-        "org": DEEPSEEK_ORG,
-        "full_name": "deepseek-ai/DeepSeek-V4-Pro",
-        "token_limit": 128000,
-    },
-    "MiniMax-M2.7": {
-        "source": TOGETHER_AI_SOURCE,
-        "org": MINIMAX_ORG,
-        "full_name": "MiniMaxAI/MiniMax-M2.7",
-        "token_limit": 202752,
-    },
-    "Kimi-K2.6": {
-        "source": TOGETHER_AI_SOURCE,
-        "org": MOONSHOT_ORG,
-        "full_name": "moonshotai/Kimi-K2.6",
-        "token_limit": 262144,
-    },
-    "GLM-5.1": {
-        "source": TOGETHER_AI_SOURCE,
-        "org": ZAI_ORG,
-        "full_name": "zai-org/GLM-5.1",
-        "token_limit": 202752,
-    },
-    "Gemma-4-31B": {
-        "source": TOGETHER_AI_SOURCE,
-        "org": GOOGLE_ORG,
-        "full_name": "google/gemma-4-31B-it",
-        "token_limit": 262144,
-    },
-    # anthropic context window from: https://platform.claude.com/docs/en/about-claude/models/overview
-    "claude-haiku-4-5-20251001": {
-        "source": ANTHROPIC_SOURCE,
-        "org": ANTHROPIC_ORG,
-        "full_name": "claude-haiku-4-5-20251001",
-        "token_limit": 200000,
-    },
-    "claude-sonnet-4-5-20250929": {
-        "source": ANTHROPIC_SOURCE,
-        "org": ANTHROPIC_ORG,
-        "full_name": "claude-sonnet-4-5-20250929",
-        "token_limit": 200000,
-    },
-    "claude-sonnet-4-6": {
-        "source": ANTHROPIC_SOURCE,
-        "org": ANTHROPIC_ORG,
-        "full_name": "claude-sonnet-4-6",
-        "token_limit": 200000,
-    },
-    "claude-opus-4-7": {
-        "source": ANTHROPIC_SOURCE,
-        "org": ANTHROPIC_ORG,
-        "full_name": "claude-opus-4-7",
-        "token_limit": 200000,
-    },
-    "claude-opus-4-8": {
-        "source": ANTHROPIC_SOURCE,
-        "org": ANTHROPIC_ORG,
-        "full_name": "claude-opus-4-8",
-        "token_limit": 200000,
-    },
-    # xAI context window from: https://console.x.ai/ -> click on API Models (cube symbol on menu)
-    "grok-4.20-0309-reasoning": {
-        "source": XAI_SOURCE,
-        "org": XAI_ORG,
-        "full_name": "grok-4.20-0309-reasoning",
-        "token_limit": 2000000,
-    },
-    "grok-4.20-0309-non-reasoning": {
-        "source": XAI_SOURCE,
-        "org": XAI_ORG,
-        "full_name": "grok-4.20-0309-non-reasoning",
-        "token_limit": 2000000,
-    },
-    "grok-4.3": {
-        "source": XAI_SOURCE,
-        "org": XAI_ORG,
-        "full_name": "grok-4.3",
-        "token_limit": 1000000,
-    },
-    # google context window from: https://ai.google.dev/gemini-api/docs/models
-    "gemini-3.5-flash": {
-        "source": GOOGLE_SOURCE,
-        "org": GOOGLE_ORG,
-        "full_name": "gemini-3.5-flash",
-        "token_limit": 1048576,
-    },
-    "gemini-3.1-pro-preview": {
-        "source": GOOGLE_SOURCE,
-        "org": GOOGLE_ORG,
-        "full_name": "gemini-3.1-pro-preview",
-        "token_limit": 1048576,
-    },
-    "gemini-3.1-flash-lite": {
-        "source": GOOGLE_SOURCE,
-        "org": GOOGLE_ORG,
-        "full_name": "gemini-3.1-flash-lite",
-        "token_limit": 1048576,
-    },
-}
-
-MODEL_TOKEN_LIMITS = dict()
-MODEL_NAME_TO_ORG = dict()
-MODEL_NAME_TO_SOURCE = dict()
-MODELS_TO_RUN_BY_SOURCE = defaultdict(dict)
-for key, value in MODELS_TO_RUN.items():
-    MODEL_TOKEN_LIMITS[value["full_name"]] = value["token_limit"]
-    MODEL_NAME_TO_SOURCE[value["full_name"]] = value["source"]
-    MODEL_NAME_TO_ORG[value["full_name"]] = value["org"]
-    MODEL_NAME_TO_ORG[key] = value["org"]
-    MODELS_TO_RUN_BY_SOURCE[value["source"]][key] = value
-
-# "gpt-4o-mini" Model used by forecaster to reformat raw response
-MODEL_TOKEN_LIMITS["gpt-4o-mini"] = 128000
-MODEL_NAME_TO_ORG["gpt-4o-mini"] = OAI_ORG
-MODEL_NAME_TO_SOURCE["gpt-4o-mini"] = OAI_SOURCE
-
-# "gpt-5-mini" Model used by metadata functions in question_curation.METADATA_MODEL_NAME
-MODEL_TOKEN_LIMITS["gpt-5-mini"] = 128000
-MODEL_NAME_TO_ORG["gpt-5-mini"] = OAI_ORG
-MODEL_NAME_TO_SOURCE["gpt-5-mini"] = OAI_SOURCE

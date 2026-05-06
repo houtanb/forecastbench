@@ -9,11 +9,10 @@ import pandas as pd
 import yfinance as yf
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))  # noqa: E402
-from helpers import constants, data_utils, dates, decorator, env  # noqa: E402
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
-from sources._metadata import SOURCE_METADATA  # noqa: E402
 from utils import gcp  # noqa: E402
+
+from helpers import constants, data_utils, dates, decorator, env  # noqa: E402
+from sources._metadata import SOURCE_METADATA  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

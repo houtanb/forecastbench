@@ -16,17 +16,18 @@ Dockerfile: $(ROOT_DIR)src/helpers/Dockerfile.template
 		-e 's/PYTHON_VERSION/python312/g' \
 		$< > Dockerfile
 
-deploy : main.py .gcloudignore requirements.txt Dockerfile
+deploy : main.py .gcloudignore requirements.txt Procfile
+	rm -rf $(UPLOAD_DIR)
 	mkdir -p $(UPLOAD_DIR)
-	cp -r $(ROOT_DIR)utils $(UPLOAD_DIR)/
-	cp -r $(ROOT_DIR)src/helpers $(UPLOAD_DIR)/helpers
-	cp -r $(ROOT_DIR)src/sources $(UPLOAD_DIR)/sources
+	cp -r $(ROOT_DIR)src/helpers $(UPLOAD_DIR)/
+	cp -r $(ROOT_DIR)src/sources $(UPLOAD_DIR)/
 	mkdir -p $(UPLOAD_DIR)/orchestration
 	cp $(ROOT_DIR)src/orchestration/__init__.py $(UPLOAD_DIR)/orchestration/
 	cp $(ROOT_DIR)src/orchestration/_source_io.py $(UPLOAD_DIR)/orchestration/
 	cp $(ROOT_DIR)src/_fb_types.py $(UPLOAD_DIR)/
 	cp $(ROOT_DIR)src/_schemas.py $(UPLOAD_DIR)/
 	cp $^ $(UPLOAD_DIR)/
+	cat $(ROOT_DIR)requirements.runtime.txt requirements.txt > $(UPLOAD_DIR)/requirements.txt
 	gcloud run jobs deploy \
 		func-data-metaculus-update-questions \
 		--project $(CLOUD_PROJECT) \

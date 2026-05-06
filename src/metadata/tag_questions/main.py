@@ -5,11 +5,18 @@ import logging
 import os
 import sys
 import time
+from types import SimpleNamespace
 
-import functions_framework
 import pandas as pd
 
+try:
+    import functions_framework
+except ModuleNotFoundError:
+    functions_framework = SimpleNamespace(http=lambda func: func)
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
+from utils import gcp  # noqa: E402
+
 from helpers import (  # noqa: E402
     constants,
     data_utils,
@@ -17,11 +24,7 @@ from helpers import (  # noqa: E402
     env,
     llm_prompts,
     model_eval,
-    question_curation,
 )
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../.."))  # noqa: E402
-from utils import gcp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,10 +38,9 @@ async def _get_category_single(index, row, semaphore):
         )
         try:
             response = await asyncio.to_thread(
-                model_eval.get_response_from_model,
-                model_name=question_curation.METADATA_MODEL_NAME,
+                model_eval.get_metadata_model_response,
                 prompt=prompt,
-                max_tokens=50,
+                max_output_tokens=50,
             )
             category = response.strip('"').strip("'").strip(" ").strip(".")
             logger.info(
@@ -79,6 +81,8 @@ def get_categories_from_llm(dfq):
 @decorator.log_runtime
 def driver(_):
     """Pull in fetched data and update questions and resolved values in question bank."""
+    from helpers import question_curation
+
     local_filename = f"/tmp/{constants.META_DATA_FILENAME}"
     dfmeta = data_utils.download_and_read(
         filename=constants.META_DATA_FILENAME,

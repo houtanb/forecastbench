@@ -184,9 +184,9 @@ def main():
 
     df["resolution_date"] = pd.to_datetime(df["resolution_date"])
     filtered_df = get_correct_resolution_dates_for_market_questions(df.copy())
-    non_market_df = df[df["source"].isin(resolution.DATA_SOURCES)]
+    dataset_df = df[df["source"].isin(resolution.DATA_SOURCES)]
     df = (
-        pd.concat([filtered_df, non_market_df], ignore_index=True)
+        pd.concat([filtered_df, dataset_df], ignore_index=True)
         .sort_values(
             by=[
                 "source",
@@ -198,14 +198,14 @@ def main():
 
     def get_scores(group, score_col):
         market_mean = group[group["source"].isin(resolution.MARKET_SOURCES)][score_col].mean()
-        non_market_mean = group[~group["source"].isin(resolution.MARKET_SOURCES)][score_col].mean()
+        dataset_mean = group[~group["source"].isin(resolution.MARKET_SOURCES)][score_col].mean()
 
         if pd.isna(market_mean):
-            return non_market_mean
-        elif pd.isna(non_market_mean):
+            return dataset_mean
+        elif pd.isna(dataset_mean):
             return market_mean
 
-        return (market_mean + non_market_mean) / 2
+        return (market_mean + dataset_mean) / 2
 
     def get_summary_table(grouping):
         summary_table = df.groupby(grouping)[["id", "score_llm", "score_super", "source"]].apply(

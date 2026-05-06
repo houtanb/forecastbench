@@ -19,8 +19,8 @@ Dockerfile: $(ROOT_DIR)src/helpers/Dockerfile.template
 NUM_CPUS = 2
 
 deploy : main.py .gcloudignore requirements.txt Dockerfile
+	rm -rf $(UPLOAD_DIR)
 	mkdir -p $(UPLOAD_DIR)
-	cp -r $(ROOT_DIR)utils $(UPLOAD_DIR)/
 	cp -r $(ROOT_DIR)src/helpers $(UPLOAD_DIR)/helpers
 	cp -r $(ROOT_DIR)src/sources $(UPLOAD_DIR)/sources
 	cp -r $(ROOT_DIR)src/resolve $(UPLOAD_DIR)/resolve
@@ -30,6 +30,7 @@ deploy : main.py .gcloudignore requirements.txt Dockerfile
 	cp $(ROOT_DIR)src/_fb_types.py $(UPLOAD_DIR)/
 	cp $(ROOT_DIR)src/_schemas.py $(UPLOAD_DIR)/
 	cp $^ $(UPLOAD_DIR)/
+	cat $(ROOT_DIR)requirements.runtime.txt requirements.txt > $(UPLOAD_DIR)/requirements.txt
 	gcloud run jobs deploy \
 		func-resolve-forecasts \
 		--project $(CLOUD_PROJECT) \

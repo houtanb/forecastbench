@@ -168,7 +168,7 @@ Here, we’re thinking about things that are probably quite unlikely to happen, 
 """  # noqa: B950
 
 
-SUPERFORECASTER_NON_MARKET_PROMPT_1 = """
+SUPERFORECASTER_DATASET_PROMPT_1 = """
 You’re going to predict the probability of the following potential outcome “at each of the resolution dates”.
 
 Question:
@@ -351,7 +351,7 @@ Here, we’re thinking about things that are probably quite unlikely to happen, 
 {{ Insert your answer }}
 """  # noqa: B950
 
-SUPERFORECASTER_NON_MARKET_JOINT_QUESTION_PROMPT_1 = """
+SUPERFORECASTER_DATASET_JOINT_QUESTION_PROMPT_1 = """
 {human_prompt} “at each of the resolution dates”.
 
 Question 1:
@@ -532,7 +532,7 @@ Output your answer (a number between 0 and 1) with an asterisk at the beginning 
 """  # noqa: B950
 
 
-SUPERFORECASTER_NON_MARKET_PROMPT_2 = """
+SUPERFORECASTER_DATASET_PROMPT_2 = """
 You’re going to predict the probability of the following potential outcome “at each of the resolution dates”.
 
 Question:
@@ -626,7 +626,7 @@ Output your answer (a number between 0 and 1) with an asterisk at the beginning 
 {{ Insert final odds for the original statement. }}
 """  # noqa: B950
 
-SUPERFORECASTER_NON_MARKET_JOINT_QUESTION_PROMPT_2 = """
+SUPERFORECASTER_DATASET_JOINT_QUESTION_PROMPT_2 = """
 {human_prompt} “at each of the resolution dates”.
 
 Question 1:
@@ -791,7 +791,7 @@ Instructions:
 """  # noqa: B950
 
 
-SUPERFORECASTER_NON_MARKET_PROMPT_3 = """
+SUPERFORECASTER_DATASET_PROMPT_3 = """
 You’re going to predict the probability of the following potential outcome “at each of the resolution dates”.
 
 Question:
@@ -913,7 +913,7 @@ Output your answer (a number between 0 and 1) with an asterisk at the beginning 
 {{ Insert final odds for the original statement. }}
 """  # noqa: B950
 
-SUPERFORECASTER_NON_MARKET_JOINT_QUESTION_PROMPT_3 = """
+SUPERFORECASTER_DATASET_JOINT_QUESTION_PROMPT_3 = """
 {human_prompt} “at each of the resolution dates”.
 
 Question 1:

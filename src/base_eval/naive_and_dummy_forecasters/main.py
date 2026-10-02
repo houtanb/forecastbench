@@ -24,6 +24,7 @@ from helpers import (  # noqa: E402
     wikipedia,
 )
 from orchestration import _io  # noqa: E402
+from sources.yfinance_questions import is_pair_id, pair_ratio_series  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,6 +59,15 @@ def get_prophet_forecast(
     df_standard, df = resolution.split_dataframe_on_source(df=df, source=source)
 
     dfr["value"] = pd.to_numeric(dfr["value"], errors="coerce")
+
+    # A yfinance pair (id "X_Y") has no series of its own; it resolves on X's price divided by
+    # Y's, so that is the series to project. Synthesized rows let the loop below treat a pair
+    # like any other id, exactly as YfinanceSource._resolve does.
+    if source == "yfinance":
+        pair_ids = [mid for mid in df_standard["id"].unique() if is_pair_id(mid)]
+        if pair_ids:
+            ratio_frames = [pair_ratio_series(dfr, mid) for mid in pair_ids]
+            dfr = pd.concat([dfr, *ratio_frames], ignore_index=True)
 
     resolution_dates = sorted(df_standard["resolution_date"].unique())
 

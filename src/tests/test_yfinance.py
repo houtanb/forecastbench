@@ -434,6 +434,7 @@ class TestSourceFetch:
         assert row["url"] == "https://finance.yahoo.com/quote/AAPL"
         assert float(row["freeze_datetime_value"]) == 254.23
         assert row["latest_close_date"] == "2026-03-17"  # the session the freeze value quotes
+        assert row["company_name"] == "Apple Inc."
 
     @patch("sources.yfinance.yf.Ticker")
     @patch.object(YfinanceSource, "_get_sp500_tickers", return_value=[])
@@ -451,6 +452,7 @@ class TestSourceFetch:
         assert bool(row["resolved"]) is True
         assert row["freeze_datetime_value"] == "N/A"
         assert row["latest_close_date"] == "N/A"
+        assert row["company_name"] == "N/A"
         assert row["question"] == "legacy question"  # original question text preserved
 
     @patch("sources.yfinance.yf.Ticker")
@@ -497,7 +499,8 @@ class TestSourceFetch:
     ):
         """A constituent that is not already in the question bank is never fetched or added.
 
-        We no longer sample yfinance, so the ticker pool must not grow with index turnover.
+        Only pair questions are sampled, so the ticker pool must not grow with index turnover;
+        the one addition is the replacement symbols from ``ticker_renames``.
         """
         freeze_today(date(2026, 3, 18))
         hist = pd.DataFrame({"Close": [254.23], "Date": pd.to_datetime(["2026-03-17"])})
@@ -1084,6 +1087,7 @@ class TestSourceUpdate:
         assert "fetch_datetime" not in result.dfq.columns
         assert "probability" not in result.dfq.columns
         assert "latest_close_date" not in result.dfq.columns
+        assert "company_name" not in result.dfq.columns
         assert "NEW" in result.resolution_files
 
     @patch.object(YfinanceSource, "_fetch_historical_prices")

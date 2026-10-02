@@ -35,6 +35,7 @@ from helpers import (  # noqa: E402
     env,
     question_curation,
 )
+from sources.yfinance_questions import is_pair_id  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1287,6 +1288,8 @@ def drop_culled_questions(source: str, dfq: pd.DataFrame) -> pd.DataFrame:
       question file stores ids with ``/`` replaced by ``_``.
     * acled: all "ten times as many" (x10) questions
     * acled: all questions whose freeze value, the 30-day average over the past 360 days, is zero
+    * yfinance: all single-ticker questions ("will X go up"). Retired in favor of the pair
+      questions (id ``X_Y``); the rows stay in the bank so published sets keep resolving.
 
     Args:
         source (str): Source name
@@ -1303,6 +1306,8 @@ def drop_culled_questions(source: str, dfq: pd.DataFrame) -> pd.DataFrame:
         is_x10 = dfq["question"].str.contains("more than ten times as many", regex=False)
         is_zero_baseline = dfq["freeze_datetime_value"].astype(float) == 0
         return dfq[~(is_x10 | is_zero_baseline)]
+    if source == "yfinance":
+        return dfq[dfq["id"].apply(is_pair_id)]
     return dfq
 
 

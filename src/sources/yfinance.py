@@ -222,6 +222,8 @@ class YfinanceSource(DatasetSource):
         current_time = dates.get_datetime_now()
 
         rows = []
+        # A ticker whose profile Yahoo did not serve tonight keeps the summary its bank row has.
+        bank_backgrounds = dict(zip(dfq["id"], dfq["background"])) if dfq is not None else {}
         # Pooled tickers that 404 this run but aren't curated (neither nullified nor renamed).
         # Recorded so the driver can surface them (e.g. via Slack) for triage into the right list.
         self.uncurated_delisted_tickers: list[str] = []
@@ -232,11 +234,11 @@ class YfinanceSource(DatasetSource):
 
         for ticker_symbol in all_tickers:
             time.sleep(1)  # Avoid YFRateLimitError
-            company_name, hist = self._fetch_one_stock(ticker_symbol)
+            company_name, business_summary, hist = self._fetch_one_stock(ticker_symbol)
 
             if company_name and not hist.empty:
                 current_price = round(hist["Close"].iloc[-1], 2)
-                background = yf.Ticker(ticker_symbol).info.get("longBusinessSummary", "N/A")
+                background = business_summary or bank_backgrounds.get(ticker_symbol, "N/A")
                 rows.append(
                     {
                         "id": ticker_symbol,
@@ -530,27 +532,36 @@ class YfinanceSource(DatasetSource):
     # Private: single stock fetch
     # ------------------------------------------------------------------
 
-    def _fetch_one_stock(self, ticker_symbol: str) -> tuple[str | None, pd.DataFrame | None]:
-        """Fetch company name and the latest historical row for one ticker.
+    def _fetch_one_stock(
+        self, ticker_symbol: str
+    ) -> tuple[str | None, str | None, pd.DataFrame | None]:
+        """Fetch company name, business summary and the latest historical row for one ticker.
 
         Args:
             ticker_symbol (str): Stock ticker symbol.
 
         Returns:
-            Tuple of (company_name, hist_df), where company_name is None when yfinance has
-            no name for the ticker, or (None, None) on failure.
+            Tuple of (company_name, business_summary, hist_df). company_name is None when
+            yfinance has no name for the ticker and business_summary is None when it has no
+            profile for it (Yahoo's profile request can fail while the quote succeeds).
+            (None, None, None) on failure.
         """
         try:
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
             company_name = info.get("longName") or info.get("shortName")
+            business_summary = info.get("longBusinessSummary")
             hist = ticker.history(period="5d", auto_adjust=False).reset_index()
             yesterday = self.get_date_today() - timedelta(days=1)
             hist["Date"] = pd.to_datetime(hist["Date"])
             hist = hist[hist["Date"].dt.date <= yesterday].tail(1)
-            return company_name, self._fill_missing_close(ticker_symbol, hist, info)
+            return (
+                company_name,
+                business_summary,
+                self._fill_missing_close(ticker_symbol, hist, info),
+            )
         except Exception:
-            return None, None
+            return None, None, None
 
     @staticmethod
     def _fill_missing_close(ticker_symbol: str, hist: pd.DataFrame, info: dict) -> pd.DataFrame:

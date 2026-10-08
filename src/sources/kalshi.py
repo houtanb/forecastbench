@@ -907,11 +907,11 @@ class KalshiSource(MarketSource):
 
         Kalshi templates titles per series, so a title may read "win 193 seats" for a market whose
         Yes outcome is "Below 193", or "above or below $4.20" for "Above $4.20". The
-        ``yes_sub_title`` always states the condition. A label that just says "Yes" adds nothing
-        to the title, so it is left off.
+        ``yes_sub_title`` can clarify the intended outcome. Missing or blank labels and labels
+        that just say "Yes" add nothing to the title, so they are left off.
         """
-        yes_sub_title = market["yes_sub_title"]
-        if yes_sub_title.strip().lower() == "yes":
+        yes_sub_title = (market.get("yes_sub_title") or "").strip()
+        if not yes_sub_title or yes_sub_title.lower() == "yes":
             return market["title"]
         return f'{market["title"]} [Yes: {yes_sub_title}]'
 

@@ -1204,6 +1204,49 @@ class TestUpdate:
         )
         assert row["url"] == "https://kalshi.com/markets/kxtest/x/kxtest"
 
+    @pytest.mark.parametrize("is_new", [False, True])
+    @pytest.mark.parametrize(
+        "label_fields, suffix",
+        [
+            ({"yes_sub_title": "Below 193"}, " [Yes: Below 193]"),
+            ({"yes_sub_title": "Hike >25bps"}, " [Yes: Hike >25bps]"),
+            ({"yes_sub_title": "  <193  "}, " [Yes: <193]"),
+            ({"yes_sub_title": "Yes"}, ""),
+            ({"yes_sub_title": "  yEs  "}, ""),
+            ({"yes_sub_title": ""}, ""),
+            ({"yes_sub_title": "   "}, ""),
+            ({"yes_sub_title": None}, ""),
+            ({}, ""),
+        ],
+    )
+    @patch.object(KalshiSource, "_build_resolution_df")
+    @patch.object(KalshiSource, "_get_market")
+    def test_yes_labels_on_new_and_existing_questions(
+        self, mock_market, mock_build, kalshi_source, label_fields, suffix, is_new
+    ):
+        """Updates preserve titles and label symbols without empty or duplicate suffixes."""
+        market = make_kalshi_api_market(ticker="KXTEST-001")
+        market.pop("yes_sub_title")
+        market.update(label_fields)
+        mock_market.return_value = market
+        mock_build.return_value = make_resolution_df(
+            [{"id": "KXTEST-001", "date": "2024-06-01", "value": 0.65}]
+        )
+        dfq = make_question_df(
+            [{"id": "existing", "resolved": True}]
+            if is_new
+            else [{"id": "KXTEST-001", "resolved": False}]
+        )
+        dff = make_kalshi_fetch_df([{"id": "KXTEST-001"}] if is_new else [])
+
+        result = kalshi_source.update(dfq, dff, existing_resolution_ids={"existing"})
+        result = kalshi_source.update(
+            result.dfq, make_kalshi_fetch_df([]), existing_resolution_ids={"existing"}
+        )
+
+        question = result.dfq.set_index("id").at["KXTEST-001", "question"]
+        assert question == market["title"] + suffix
+
     @patch.object(KalshiSource, "_build_resolution_df")
     @patch.object(KalshiSource, "_get_market")
     def test_new_question_url_uses_structured_parent_identifiers(
